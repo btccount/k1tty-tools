@@ -10,7 +10,6 @@ from claude_io import lock_files, atomic_write_text, win_long_path
 from process_monitor import format_running, snapshot_processes
 from providers import BaseProvider, dir_size_bytes
 
-CL.claude_running = lambda: snapshot_processes().get("claude", [])
 
 LABEL = {
     "user": "Вы", "assistant": "Claude", "tool": "Инструмент",
@@ -71,6 +70,13 @@ class ClaudeProvider(BaseProvider):
         return out
 
     def probe_conv_lock_sync(self, cid: str | None = None) -> tuple[bool, str]:
+        if cid and os.name != "nt":
+            # No mandatory file locks outside Windows: refuse while Claude runs at all.
+            running = snapshot_processes().get("claude", [])
+            if running:
+                return True, (f"Запущено: {format_running(running)}. На macOS/Linux нельзя проверить, "
+                              "занят ли конкретный файл, поэтому закройте Claude перед правкой.")
+            return False, ""
         if cid:
             try:
                 p = CL.session_file(cid)

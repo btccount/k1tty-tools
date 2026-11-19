@@ -1,14 +1,28 @@
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
+.venv/
+venv/
+env/
+
+# SQLite temp files
 *.sqlite3-journal
 *.sqlite-wal
 *.sqlite-shm
-.DS_Store
-Thumbs.db
 
-k1tty_editor/backups/
-k1tty_editor/k1tty_settings.json
+# Local app data (backups, user settings)
+backups/
+k1tty_settings.json
 
+# Leftovers from older layouts (data is migrated automatically on start)
+k1tty_editor/
 claude_history_editor/
 codex_history_editor/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini

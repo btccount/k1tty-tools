@@ -17,17 +17,6 @@ PROJECTION_DB = CODEX_HOME / "thread_history_1.sqlite"
 HISTORY_JSONL = CODEX_HOME / "history.jsonl"
 SESSION_INDEX = CODEX_HOME / "session_index.jsonl"
 
-def set_home(p):
-    global CODEX_HOME, SESSIONS, PROJECTION_DB, HISTORY_JSONL, SESSION_INDEX
-    CODEX_HOME = Path(p)
-    SESSIONS = CODEX_HOME / "sessions"
-    PROJECTION_DB = CODEX_HOME / "thread_history_1.sqlite"
-    HISTORY_JSONL = CODEX_HOME / "history.jsonl"
-    SESSION_INDEX = CODEX_HOME / "session_index.jsonl"
-
-ENV_CTX_PREFIXES = ("<environment_context>", "<app-context>", "<user_instructions>",
-                    "<AGENTS", "<turn_context", "<permissions>")
-
 AUTO_INJECT_RE = re.compile(r"^\s*<(environment_context|app-context|user_instructions)")
 
 def db_write_probe(db_path) -> tuple[bool, str]:
@@ -354,10 +343,6 @@ def turns_from_history(items: list) -> list:
                 turns.append(cur)
             cur["items"].append(it)
     return turns
-
-
-def idx_key(items: list, i: int) -> str:
-    return items[i]["key"]
 
 
 def parse_key(key) -> tuple[int, int]:
@@ -774,7 +759,6 @@ def check_leak(tid: str, removed_texts, backups: Path | None = None) -> list:
     leaks = []
     frags = []
     for t in removed_texts:
-        c = re.sub(r"\s+", " ", t or "").strip()
         for s in (t or "").split("\n"):
             s2 = re.sub(r"[\\\"`]+", "", s).strip()
             if len(s2) >= 70:
@@ -899,28 +883,6 @@ def _extract_texts(lines) -> list:
 
 def _json_escape_frag(text: str) -> str:
     return json.dumps(text, ensure_ascii=False)[1:-1]
-
-
-def _frag_candidates(text: str) -> list:
-    out = []
-    full = _json_escape_frag(text)
-    if len(full) < 1000:
-        out.append(full)
-        if len(full) > 40:
-            out.append(full[:400])
-            out.append(full[-400:])
-        elif len(full) > 40:
-            out.append(full[:400])
-    for line in text.split("\n"):
-        line = line.strip()
-        if len(line) >= 60:
-            out.append(_json_escape_frag(line[:400]))
-            break
-    uniq = []
-    for f in out:
-        if f and f not in uniq:
-            uniq.append(f)
-    return uniq
 
 
 def _deep_replace_text(obj, old_text: str, new_text: str) -> bool:

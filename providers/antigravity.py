@@ -18,8 +18,6 @@ if not os.environ.get("ANTIGRAVITY_BACKUP_ROOT"):
     else:
         T.BACKUP_ROOT = Path(__file__).resolve().parent.parent / "backups" / "antigravity"
 
-T.antigravity_running = lambda: snapshot_processes(T.DAEMON_DIR).get("antigravity", [])
-
 KIND = {14: "user", 15: "assistant", 132: "tool", 23: "compact", 101: "system", 17: "error"}
 KIND_BY_NAME = {
     "USER_INPUT": "user", "PLANNER_RESPONSE": "assistant", "GENERIC": "tool",

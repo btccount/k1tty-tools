@@ -7,10 +7,8 @@ import os
 import re
 import shutil
 import sqlite3
-import struct
 import sys
-import time
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 if os.name == "nt":
@@ -27,14 +25,14 @@ for stream in (sys.stdout, sys.stderr):
             pass
 
 APPDATA = Path(os.environ.get("ANTIGRAVITY_APPDATA", "") or
-                (Path(os.environ.get("USERPROFILE", "")) / ".gemini" / "antigravity"))
+                (Path.home() / ".gemini" / "antigravity"))
 CONVERSATIONS_DIR = APPDATA / "conversations"
 BRAIN_DIR = APPDATA / "brain"
 SUMMARIES_DB = APPDATA / "conversation_summaries.db"
 ANNOTATIONS_DIR = APPDATA / "annotations"
 DAEMON_DIR = APPDATA / "daemon"
 BACKUP_ROOT = Path(os.environ.get("ANTIGRAVITY_BACKUP_ROOT", "") or
-                   (Path(__file__).resolve().parent / "backups"))
+                   (Path(__file__).resolve().parent.parent / "backups" / "antigravity"))
 
 
 @dataclass(frozen=True)
@@ -78,16 +76,6 @@ def default_store() -> AgStore:
 
 def _resolve_store(store: AgStore | None) -> AgStore:
     return store if store is not None else default_store()
-
-STEP_TYPES = {
-    14: "USER_INPUT",
-    15: "PLANNER_RESPONSE",
-    17: "ERROR",
-    23: "CHECKPOINT",
-    101: "SYSTEM_MESSAGE",
-    132: "GENERIC (tool)",
-}
-
 
 def read_varint(buf: bytes, i: int):
     result = 0
@@ -292,91 +280,6 @@ def read_jsonl(path: Path):
     return lines
 
 
-def _process_image_name(pid: int):
-    try:
-        import subprocess
-        out = subprocess.run(
-            ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
-            capture_output=True, text=True, errors="replace", timeout=15,
-        ).stdout
-        for line in out.splitlines():
-            line = line.strip()
-            if not line.startswith('"'):
-                continue
-            parts = [p.strip('"') for p in line.split('","')]
-            if len(parts) >= 2 and parts[1].strip() == str(pid):
-                return parts[0]
-    except Exception:
-        return None
-    return None
-
-
-def antigravity_running() -> list:
-    running = []
-    if DAEMON_DIR.exists():
-        for hub in DAEMON_DIR.glob("hub_*.json"):
-            try:
-                info = json.loads(hub.read_text(encoding="utf-8"))
-                pid = int(info.get("pid", 0))
-                if pid:
-                    image = _process_image_name(pid)
-                    if image and ("antigravity" in image.lower() or "language_server" in image.lower()):
-                        running.append(f"{hub.name}: {image} (PID {pid})")
-            except Exception:
-                continue
-    try:
-        import subprocess
-        out = subprocess.run(["tasklist", "/FO", "CSV", "/NH"], capture_output=True,
-                             text=True, errors="replace", timeout=20).stdout
-        for line in out.splitlines():
-            low = line.lower()
-            if "antigravity" in low or "language_server" in low:
-                parts = [p.strip('"') for p in line.split('","')]
-                if parts:
-                    running.append(f"процесс: {parts[0]} (PID {parts[1] if len(parts) > 1 else '?'})")
-    except Exception:
-        pass
-    return running
-
-
-def list_conversations(store: AgStore | None = None):
-    s = _resolve_store(store)
-    res = []
-    if not s.conversations_dir.exists():
-        return res
-    titles = {}
-    steps_count = {}
-    try:
-        con = connect_ro(s.summaries_db)
-        for cid, title, sc in con.execute(
-            "select conversation_id, title, step_count from conversation_summaries"
-        ):
-            titles[cid.decode()] = (title or b"").decode("utf-8", "replace")
-            steps_count[cid.decode()] = int(sc)
-        con.close()
-    except Exception:
-        pass
-    for db in sorted(s.conversations_dir.glob("*.db"), key=lambda p: p.stat().st_mtime, reverse=True):
-        cid = db.stem
-        n = None
-        try:
-            con = connect_ro(db)
-            n = con.execute("select count(*), max(idx) from steps").fetchone()
-            con.close()
-        except Exception:
-            pass
-        res.append({
-            "id": cid,
-            "db": db,
-            "size": db.stat().st_size,
-            "mtime": datetime.fromtimestamp(db.stat().st_mtime),
-            "title": titles.get(cid) or "(без названия)",
-            "steps_count_summaries": steps_count.get(cid),
-            "steps_in_db": (n[0], n[1]) if n else None,
-        })
-    return res
-
-
 def brain_dir(cid: str, store: AgStore | None = None) -> Path:
     s = _resolve_store(store)
     return s.brain_dir_root / cid / ".system_generated"
@@ -430,42 +333,6 @@ def regen_chunks(cdir: Path, new_bytes: bytes):
         (cdir / f"{ci:08d}.jsonl").write_bytes(part)
 
 
-def print_history(entries, n=None, from_end=True, max_chars=250):
-    turns = []
-    for e in entries:
-        if e.get("type") == "USER_INPUT":
-            turns.append({"u": e["step_index"], "items": [e]})
-        elif turns:
-            turns[-1]["items"].append(e)
-        else:
-            turns.append({"u": None, "items": [e]})
-    sel = turns[-n:] if n and from_end else turns
-    for tno, t in enumerate(sel, 1):
-        first = t["items"][0]
-        print(f"\n--- Ход {tno} (шаги {first['step_index']}..{t['items'][-1]['step_index']}) ---")
-        for e in t["items"]:
-            content = (e.get("content") or "").replace("\n", " ")
-            if len(content) > max_chars:
-                content = content[:max_chars] + f" ...[+{len(e.get('content') or '')-max_chars}]"
-            tc = e.get("tool_calls") or []
-            tc_str = "; ".join(f"{c.get('name')}()" for c in tc) if tc else ""
-            print(f"  [{e['step_index']:>4}] {e['type']:<16} {content}")
-            if tc_str:
-                print(f"          tool_calls: {tc_str}")
-
-
-def steps_ids_le(entries, user_turn_index: int):
-    turns = [e for e in entries if e.get("type") == "USER_INPUT"]
-    if 1 <= user_turn_index <= len(turns):
-        return turns[user_turn_index - 1]["step_index"]
-    raise ValueError("нет такого хода")
-
-
-def verify_not_running():
-    r = antigravity_running()
-    return (not r), r
-
-
 def db_write_probe(db_path) -> tuple[bool, str]:
     try:
         con = sqlite3.connect(str(db_path), timeout=2.0)
@@ -515,10 +382,6 @@ def full_backup(cid: str, tag: str = "", store: AgStore | None = None) -> Path:
         "appdata": str(s.appdata),
     }, ensure_ascii=False, indent=1), encoding="utf-8")
     return bdir
-
-
-def create_backup(cid: str, store: AgStore | None = None) -> Path:
-    return full_backup(cid, store=store)
 
 
 def _restore_db_with_wal(src_db: Path, db_path: Path):
@@ -798,7 +661,7 @@ def update_summaries(cid: str, keep_step: int, kept_entries, all_entries, mode: 
     try:
         con.execute("begin")
 
-        last_user_idx, last_user_time, last_step = 0, None, -1
+        last_user_idx, last_step = 0, -1
         first_step = None
         for e in kept_entries:
             si = e["step_index"]
@@ -806,7 +669,6 @@ def update_summaries(cid: str, keep_step: int, kept_entries, all_entries, mode: 
             first_step = si if first_step is None else min(first_step, si)
             if e.get("type") == "USER_INPUT":
                 last_user_idx = max(last_user_idx, si)
-                last_user_time = e.get("created_at")
 
         if db_count is not None:
             new_step_count = db_count
@@ -1307,282 +1169,3 @@ def check_leak(cid: str, removed_entries, kept_entries=(), allow_paths=(), store
         except Exception as e:
             leaks.append((str(s.summaries_db) + " (проверка FTS не удалась)", repr(e)))
     return leaks
-
-
-def choose_cid() -> str | None:
-    convs = list_conversations()
-    cwd_conversations = CONVERSATIONS_DIR
-    print()
-    print("=== Обнаруженные диалоги (Antigravity) ===")
-    print("  папка:", cwd_conversations)
-    for i, c in enumerate(convs, 1):
-        print(f"{i:>3}. {c['id']}")
-        print(f"     название: {c['title']}")
-        print(f"     размер: {c['size']:,} Б, изменён: {c['mtime']:%d.%m.%Y %H:%M:%S}, "
-              f"шагов в БД: {c['steps_in_db'][0] if c['steps_in_db'] else '?'}")
-    if not convs:
-        print("Диалоги не найдены.")
-        return None
-    while True:
-        s = input("Выберите номер диалога (или Enter для выхода): ").strip()
-        if not s:
-            return None
-        if s.isdigit() and 1 <= int(s) <= len(convs):
-            return convs[int(s) - 1]["id"]
-        print("Неверный ввод.")
-
-
-def choose_rollback_point(cid: str):
-    entries = read_history(cid)
-    if not entries:
-        print("История пуста или transcript не найден.")
-        return None
-    last = entries[-1]["step_index"]
-    nturns = sum(1 for e in entries if e.get("type") == "USER_INPUT")
-    print()
-    print(f"Всего шагов: {len(entries)} (макс. индекс {last}), пользовательских ходов: {nturns}")
-    print("Доступные варианты отката:")
-    print("  1. По ходам (turn = пользовательское сообщение со всеми ответами/инструментами)")
-    print("  2. Произвольный шаг (index)")
-    s = input("Вариант [1/2]: ").strip()
-    if s == "2":
-        idx = input(f"Индекс шага, до которого сохранить всё (0..{last}): ").strip()
-        if not idx.isdigit() or not (0 <= int(idx) <= last):
-            print("Неверный индекс.")
-            return None
-        return int(idx)
-    print_history(entries, n=15, from_end=True)
-    print("Номер хода - сколько ХОДОВ оставить (самый ранний 1).")
-    keep = input(f"Оставить первые N ходов (1..{nturns}, 0=отмена): ").strip()
-    if not keep.isdigit():
-        return None
-    n = int(keep)
-    if n == 0:
-        return None
-    if n > nturns:
-        print("N больше числа ходов - откат не требуется.")
-        return None
-    turn_lines = [e for e in entries if e.get("type") == "USER_INPUT"]
-    if n < len(turn_lines):
-        return turn_lines[n]["step_index"] - 1
-    return last
-
-
-def show_preview(cid: str, keep_step: int, mode: str = "tail"):
-    entries = read_history(cid)
-    if mode == "tail":
-        kept = [e for e in entries if e["step_index"] <= keep_step]
-        removed = [e for e in entries if e["step_index"] > keep_step]
-        head = f"=== Будет УДАЛЕНО: {len(removed)} шагов (с индекса {keep_step + 1}) ==="
-        tail = f"=== Останется: {len(kept)} шагов (0..{keep_step}) ==="
-    else:
-        kept = [e for e in entries if e["step_index"] >= keep_step]
-        removed = [e for e in entries if e["step_index"] < keep_step]
-        head = f"=== Будет УДАЛЕНО: {len(removed)} шагов (до индекса {keep_step}) ==="
-        tail = f"=== Останется: {len(kept)} шагов (с {keep_step}) ==="
-    print(f"\n{head}")
-    for e in removed[:40]:
-        c = (e.get("content") or "").replace("\n", " ")[:150]
-        tc = "; ".join(x.get("name", "") for x in e.get("tool_calls") or [])
-        print(f"  [{e['step_index']:>4}] {e['type']:<16} {c}" + (f"  | tools: {tc}" if tc else ""))
-    if len(removed) > 40:
-        print(f"  ... и ещё {len(removed) - 40} шагов")
-    print(f"\n{tail}")
-    for e in kept[-10:]:
-        c = (e.get("content") or "").replace("\n", " ")[:150]
-        print(f"  [{e['step_index']:>4}] {e['type']:<16} {c}")
-    prep = rollback(cid, keep_step, preview_only=True, mode=mode)
-    print("\nДополнительно будет удалено:")
-    print("  строки транскрипта (compact+full+чанки):", prep["transcript_lines_removed"])
-    print("  files сообщений:", prep["will_delete"]["messages_files"],
-          "\n  папок steps/<n>:", prep["will_delete"]["steps_output_dirs"],
-          "\n  логов задач:", prep["will_delete"]["task_logs"])
-    con = connect_ro(CONVERSATIONS_DIR / f"{cid}.db")
-    cmp = "<" if mode == "head" else ">"
-    print("  строк в таблице steps:", con.execute(f"select count(*) from steps where idx {cmp} ?", (keep_step,)).fetchone()[0])
-    con.close()
-
-
-def apply_rollback(cid: str, keep_step: int, mode: str = "tail"):
-    ok, running = verify_not_running()
-    if not ok:
-        print("\n!!! Antigravity, похоже, запущен:")
-        for r in running:
-            print("   ", r)
-        s = input("Продолжать всё равно НЕ рекомендуется. Введите 'нет' для отмены: ").strip().lower()
-        if s not in ("да", "y", "yes", "продолжить"):
-            print("Отменено.")
-            return
-    print("\n>>> Шаг 1: резервная копия...")
-    bdir = full_backup(cid, tag="prerollback")
-    print("    Бэкап:", bdir)
-    print("\n>>> Шаг 2: подтверждение")
-    if mode == "head":
-        print(f"    Будут удалены ВСЕ шаги индексом < {keep_step} (во всех хранилищах).")
-    else:
-        print(f"    Будут удалены ВСЕ шаги индексом > {keep_step} (во всех хранилищах).")
-    s = input("    Для подтверждения наберите 'УДАЛИТЬ': ").strip()
-    if s != "УДАЛИТЬ":
-        print("Отменено.")
-        return
-    print("\n>>> Шаг 3: выполнение отката...")
-    try:
-        report = rollback(cid, keep_step, preview_only=False, mode=mode)
-    except Exception as e:
-        print("ОШИБКА во время отката:", repr(e))
-        print("Автовосстановление из резервной копии...")
-        restore_backup(bdir)
-        print("Восстановлено. Ничего не изменилось.")
-        raise
-    for k, v in report.items():
-        print(f"    {k}: {v}")
-    print("\n>>> Шаг 4: проверка утечек удалённого текста...")
-    btr = bdir / "brain" / cid / ".system_generated" / "logs" / "transcript_full.jsonl"
-    if not btr.exists():
-        btr = bdir / "brain" / cid / ".system_generated" / "logs" / "transcript.jsonl"
-    removed, kept = [], []
-    if btr.exists():
-        for line in read_jsonl(btr):
-            d = json.loads(line)
-            goes = d["step_index"] > keep_step if mode == "tail" else d["step_index"] < keep_step
-            (removed if goes else kept).append(d)
-    leaks = check_leak(cid, removed, kept)
-    if leaks:
-        print("    !!! ОБНАРУЖЕНЫ УТЕЧКИ:")
-        for t, s in leaks[:20]:
-            print("      ", t, "->", s[:60])
-    else:
-        print("    Утечек не обнаружено: удалённый текст отсутствует в транскриптах, чанках и FTS.")
-    print("\nГотово. Рекомендуется перезапустить Antigravity и проверить диалог.")
-
-
-def menu_view_conversation(cid):
-    entries = read_history(cid)
-    print(f"\n                       (Найдено шагов: {len(entries)})")
-    print("  Вывод будет показан по ходам. Как много показать?")
-    print("   Enter - последние 15 ходов, 'all' - все")
-    s = input("  > ").strip()
-    if s.lower() == "all":
-        print_history(entries)
-    else:
-        n = int(s) if s.isdigit() and int(s) > 0 else 15
-        print_history(entries, n=n, from_end=True)
-
-
-def menu_recent(cid):
-    entries = read_history(cid)
-    print(f"\nВсего шагов: {len(entries)}. Показать последние N ходов.")
-    s = input("N (по умолч. 5): ").strip() or "5"
-    n = int(s) if s.isdigit() and int(s) > 0 else 5
-    print_history(entries, n=n, from_end=True)
-
-
-def main_menu():
-    if not APPDATA.exists():
-        print(f"Папка Antigravity не найдена: {APPDATA}")
-        return
-    print()
-    print("=" * 70)
-    print(" Antigravity History Editor  --  откат истории диалогов")
-    print("=" * 70)
-    ok, running = verify_not_running()
-    if not ok:
-        print(" ВНИМАНИЕ: Antigravity запущен:")
-        for r in running:
-            print("   ", r)
-        print(" Изменения при запущенном приложении небезопасны.")
-    else:
-        print(" Antigravity не запущен (запись безопасна).")
-    print()
-    print(" 1. Список диалогов")
-    print(" 2. Просмотр истории выбранного диалога")
-    print(" 3. Просмотр последних N сообщений")
-    print(" 4. Выбор точки отката + превью + применение")
-    print(" 5. Создать резервную копию")
-    print(" 6. Восстановить из резервной копии")
-    print(" 7. Открыть ВЕБ-интерфейс (красивый просмотр/редактор - рекомендуется)")
-    print(" 0. Выход")
-    choice = input("\nВыбор: ").strip()
-    if choice == "1":
-        list_conversations()
-        choose_cid()
-    elif choice in ("2", "3", "4"):
-        cid = choose_cid()
-        if not cid:
-            return
-        if choice == "2":
-            menu_view_conversation(cid)
-        elif choice == "3":
-            menu_recent(cid)
-        else:
-            ks = choose_rollback_point(cid)
-            if ks is None:
-                return
-            show_preview(cid, ks)
-            if input("\nПродолжить к применению? [y/N]: ").strip().lower() not in ("y", "yes", "да", "д"):
-                return
-            apply_rollback(cid, ks)
-    elif choice == "5":
-        cid = choose_cid()
-        if cid:
-            bdir = full_backup(cid)
-            print("Бэкап создан:", bdir)
-    elif choice == "6":
-        cid = choose_cid()
-        if not cid:
-            return
-        root = BACKUP_ROOT / cid
-        if not root.exists():
-            print("Бэкапов для диалога нет:", root)
-            return
-        bdirs = sorted(root.iterdir())
-        for i, bd in enumerate(bdirs, 1):
-            print(f"{i}. {bd.name}")
-        s = input("Номер бэкапа: ").strip()
-        if s.isdigit() and 1 <= int(s) <= len(bdirs):
-            ok, running = verify_not_running()
-            if not ok:
-                print("Antigravity запущен - восстановление отменено.")
-                return
-            restore_backup(bdirs[int(s) - 1])
-    elif choice == "7":
-        import subprocess
-        web = Path(__file__).resolve().parent / "web_editor.py"
-        subprocess.Popen([sys.executable, "-X", "utf8", str(web)])
-        print("\nВеб-интерфейс запускается: http://127.0.0.1:8765")
-        print("(если браузер не открылся - перейдите по адресу вручную)")
-
-
-if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        if sys.argv[1] == "--list":
-            for c in list_conversations():
-                print(c["id"], c["steps_in_db"], c["title"])
-        elif sys.argv[1] == "--preview" and len(sys.argv) > 2:
-            ks = int(sys.argv[3]) if len(sys.argv) > 3 else int(input("keep_step: "))
-            show_preview(sys.argv[2], ks)
-        elif sys.argv[1] == "--rollback" and len(sys.argv) > 3:
-            apply_rollback(sys.argv[2], int(sys.argv[3]))
-        elif sys.argv[1] == "--keep-from" and len(sys.argv) > 3:
-            apply_rollback(sys.argv[2], int(sys.argv[3]), mode="head")
-        elif sys.argv[1] == "--preview-head" and len(sys.argv) > 3:
-            show_preview(sys.argv[2], int(sys.argv[3]), mode="head")
-        elif sys.argv[1] == "--edit-text" and len(sys.argv) > 4:
-            cid, idx, src = sys.argv[2], int(sys.argv[3]), Path(sys.argv[4])
-            new_text = src.read_text(encoding="utf-8").strip()
-            ok, running = verify_not_running()
-            if not ok:
-                print("Antigravity запущен - правка отменена:")
-                for r in running:
-                    print("   ", r)
-                sys.exit(1)
-            bdir = full_backup(cid, tag="preedit")
-            print("Бэкап:", bdir)
-            print(json.dumps(edit_step_text(cid, idx, new_text), ensure_ascii=False, indent=1))
-        elif sys.argv[1] == "--backup" and len(sys.argv) > 2:
-            print(full_backup(sys.argv[2]))
-        else:
-            print(__doc__)
-    else:
-        while True:
-            main_menu()

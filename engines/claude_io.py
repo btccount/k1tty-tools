@@ -63,15 +63,6 @@ def lock_files(paths):
                 pass
 
 
-def probe_file_writable(path: Path | str) -> tuple[bool, str]:
-    try:
-        with lock_files([path]):
-            pass
-        return True, ""
-    except Exception as e:
-        return False, str(e)
-
-
 def atomic_write_text(path: Path | str, content: str, encoding: str = "utf-8"):
     p = Path(path)
     tmp = p.with_name(f".{os.getpid()}.tmp")

@@ -18,41 +18,9 @@ PROJECTS_DIR = CLAUDE_HOME / "projects"
 HISTORY_JSONL = CLAUDE_HOME / "history.jsonl"
 BACKUPS_DIR = CLAUDE_HOME.parent / "claude_backups"
 
-def set_home(p: Path | str):
-    global CLAUDE_HOME, PROJECTS_DIR, HISTORY_JSONL, BACKUPS_DIR
-    CLAUDE_HOME = Path(p)
-    PROJECTS_DIR = CLAUDE_HOME / "projects"
-    HISTORY_JSONL = CLAUDE_HOME / "history.jsonl"
-    BACKUPS_DIR = CLAUDE_HOME.parent / "claude_backups"
-    _FILE_CACHE.clear()
-
 def _test_mode() -> bool:
     name = CLAUDE_HOME.resolve().name.lower()
     return name in ("sandbox", "claude_sandbox") or "test" in name
-
-
-def claude_running() -> list[str]:
-    running = []
-    if os.name != "nt":
-        return running
-    try:
-        import subprocess
-        out = subprocess.run(
-            ["tasklist", "/FO", "CSV", "/NH"],
-            capture_output=True, text=True, errors="replace", timeout=15
-        ).stdout
-        seen = set()
-        for line in out.splitlines():
-            low = line.lower()
-            if "claude" in low and '"' in line:
-                parts = [p.strip('"') for p in line.split('","')]
-                if parts and parts[0] not in seen:
-                    seen.add(parts[0])
-                    pid = parts[1] if len(parts) > 1 else "?"
-                    running.append(f"{parts[0]} (PID {pid})")
-    except Exception:
-        pass
-    return running
 
 
 _FILE_CACHE: dict[str, dict] = {}

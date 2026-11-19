@@ -22,7 +22,6 @@ MAX_BLOCK = 64 * MIB
 CHUNK_SIZE = 64 * 1024
 
 PRESET_IDS = {"fast": 0, "balanced": 1, "ultra": 2}
-PRESET_NAMES = {0: "fast", 1: "balanced", 2: "ultra"}
 BLOCK_LIMITS = {"fast": 8 * MIB, "balanced": 24 * MIB, "ultra": 48 * MIB}
 
 

@@ -262,10 +262,6 @@ def sandbox_cut(tid, key, expected_revision, mode="tail", phase=lambda _: None, 
             con.close()
 
 
-def sandbox_tail(tid, delete_key, expected_revision, phase=lambda _: None):
-    return sandbox_cut(tid, delete_key, expected_revision, "tail", phase)
-
-
 def sandbox_restore(bdir, phase=lambda _: None, allow_real=False):
     if not allow_real and C.CODEX_HOME.resolve().name.lower() not in ("sandbox", "codex_sandbox"):
         raise PermissionError("Потоковое восстановление пока разрешено только в песочнице")

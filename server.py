@@ -11,7 +11,17 @@ import uuid
 import webbrowser
 from pathlib import Path
 
-from aiohttp import WSMsgType, web
+if sys.version_info < (3, 14):
+    sys.exit(
+        f"K1tty Tools requires Python 3.14 or newer (found {sys.version.split()[0]}).\n"
+        "Install it from https://www.python.org/downloads/ or run with uv: "
+        "uv run --python 3.14 --with-requirements requirements.txt python -X utf8 server.py"
+    )
+
+try:
+    from aiohttp import WSMsgType, web
+except ImportError:
+    sys.exit("Missing dependencies. Install them with: pip install -r requirements.txt")
 
 HERE = Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
@@ -22,7 +32,8 @@ if str(HERE / "engines") not in sys.path:
 import ag_history_tool as AG_MOD
 import chat_converter as CC
 import k1tty_pack as KP
-from process_monitor import format_running, snapshot_processes
+import legacy_layout
+from process_monitor import snapshot_processes
 from providers import BaseProvider, build_providers
 
 STATIC_DIR = HERE / "static"
@@ -741,6 +752,12 @@ def main():
     flags = {a for a in sys.argv[1:] if a.startswith("-")}
     port = int(args[0]) if args else 8780
     no_open = "--no-open" in flags or os.environ.get("NO_BROWSER") == "1"
+
+    try:
+        for line in legacy_layout.migrate(HERE):
+            print(line, flush=True)
+    except Exception as e:
+        print(f"Could not migrate data from k1tty_editor/: {e!r}", flush=True)
 
     srv = K1ttyServer()
     app = srv.create_app()
