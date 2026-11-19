@@ -70,13 +70,12 @@ class ClaudeProvider(BaseProvider):
         return out
 
     def probe_conv_lock_sync(self, cid: str | None = None) -> tuple[bool, str]:
-        if cid and os.name != "nt":
+        if cid and os.name != "nt" and not CL._test_mode():
             # No mandatory file locks outside Windows: refuse while Claude runs at all.
             running = snapshot_processes().get("claude", [])
             if running:
                 return True, (f"Запущено: {format_running(running)}. На macOS/Linux нельзя проверить, "
                               "занят ли конкретный файл, поэтому закройте Claude перед правкой.")
-            return False, ""
         if cid:
             try:
                 p = CL.session_file(cid)

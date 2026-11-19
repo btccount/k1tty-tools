@@ -102,6 +102,8 @@ def _is_ephemeral_workspace(p: str) -> bool:
     low = p.replace("/", "\\").lower()
     if "\\claude-data\\" in low and "\\scratch-workspaces\\" in low:
         return True
+    if "\\claude\\scratch-workspaces\\" in low:
+        return True
     if "\\documents\\codex\\" in low:
         return True
     return False
@@ -271,7 +273,7 @@ def export_provider_chat(prov, cid: str, *, include_tools: bool = True) -> dict:
                             if isinstance(uris, list) and uris:
                                 u0 = unquote(str(uris[0]))
                                 if u0.startswith("file:///"):
-                                    directory = u0[8:]
+                                    directory = u0[8:] if (len(u0) >= 10 and u0[9] == ":") else u0[7:]
                         except Exception:
                             pass
             finally:
@@ -1715,12 +1717,16 @@ def import_to_codex(
 
 
 def _encode_claude_slug(cwd: str) -> str:
-    trimmed = cwd.strip().rstrip("\\/")
-    if len(trimmed) >= 2 and trimmed[1] == ":":
+    trimmed = cwd.strip()
+    if len(trimmed) > 1:
+        trimmed = trimmed.rstrip("\\/")
+    if len(trimmed) == 2 and trimmed[1] == ":":
+        return f"{trimmed[0]}--"
+    if len(trimmed) >= 3 and trimmed[1] == ":":
         drive = trimmed[0]
         rest = re.sub(r"[^A-Za-z0-9]", "-", trimmed[2:].lstrip("\\/"))
         return f"{drive}--{rest}" if rest else f"{drive}--"
-    clean = re.sub(r"[^A-Za-z0-9]+", "-", trimmed).strip("-")
+    clean = re.sub(r"[^A-Za-z0-9]", "-", trimmed)
     return clean or "imported"
 
 
@@ -1768,6 +1774,8 @@ def _find_claude_desktop_context() -> tuple[Path | None, Path | None, dict | Non
     roots = [
         user_home / "AppData" / "Local" / "Claude-Data",
         user_home / "AppData" / "Roaming" / "Claude",
+        user_home / "Library" / "Application Support" / "Claude",
+        user_home / ".config" / "Claude",
     ]
     for root in roots:
         if not root.is_dir():

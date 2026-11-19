@@ -27,7 +27,7 @@ def _test_mode() -> bool:
 
 
 def _stream_supported(tid: str) -> bool:
-    return os.name == "nt" and C.PROJECTION_DB.is_file() and len(C.thread_files(tid)) == 1
+    return len(C.thread_files(tid)) == 1
 
 
 def _full_revision(tid: str) -> str:
@@ -56,13 +56,11 @@ class CodexProvider(BaseProvider):
     def state_sync(self, running_map: dict[str, list[str]]) -> dict:
         running = running_map.get("codex", [])
         avail = C.SESSIONS.exists()
-        writable = bool(avail and (os.name == "nt" and C.PROJECTION_DB.is_file() or _test_mode()))
+        writable = bool(avail)
         if not avail:
             note = f"Каталог сессий не найден: {C.SESSIONS}"
         elif _test_mode():
             note = "ТЕСТ-РЕЖИМ: изменения пишутся в песочницу."
-        elif not writable:
-            note = "Запись отключена (нужна Windows и thread_history_1.sqlite); доступен режим чтения."
         elif running:
             note = f"Запущено: {format_running(running)}. Закройте тред в Codex перед правкой и откройте заново после."
         else:
@@ -99,14 +97,14 @@ class CodexProvider(BaseProvider):
                 "size": t["size"],
                 "mtime": t["mtime"].strftime("%d.%m.%Y %H:%M"),
                 "mtime_ts": t["mtime"].timestamp(),
-                "writable": _test_mode() or (os.name == "nt" and C.PROJECTION_DB.is_file() and single),
+                "writable": _test_mode() or single,
             })
         return out
 
     def probe_conv_lock_sync(self, cid: str | None = None) -> tuple[bool, str]:
         if cid:
             files = C.thread_files(cid)
-            if files and os.name == "nt":
+            if files:
                 try:
                     with lock_rollouts(files):
                         pass
@@ -374,9 +372,8 @@ class CodexProvider(BaseProvider):
             (bdir / "backup.meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
 
         set_phase("cut")
-        if os.name == "nt":
-            with lock_rollouts(files):
-                pass
+        with lock_rollouts(files):
+            pass
         if C.PROJECTION_DB.is_file():
             con = sqlite3.connect(str(C.PROJECTION_DB), timeout=5)
             try:
@@ -444,7 +441,9 @@ class CodexProvider(BaseProvider):
                 restorable = bool(
                     has_meta and (
                         meta.get("tag") == "delete"
-                        or (os.name == "nt" and meta.get("sha256") and meta.get("projection_sha256"))
+                        or bool(meta.get("tail_backup"))
+                        or meta.get("tag") in ("k1tty_unlock", "k1tty_lock")
+                        or (meta.get("sha256") and (meta.get("projection_sha256") or not (bdir / "projection.sqlite").is_file()))
                         or _test_mode()
                     )
                 )
@@ -641,7 +640,7 @@ class CodexProvider(BaseProvider):
             set_phase("done")
             return {"restored": str(bdir), "provider": self.id}
 
-        if os.name == "nt" and meta.get("sha256") and meta.get("projection_sha256"):
+        if meta.get("sha256") and (meta.get("projection_sha256") or not (bdir / "projection.sqlite").is_file()):
             result = codex_stream.sandbox_restore(bdir, set_phase, allow_real=not _test_mode())
         elif meta.get("tag") in ("k1tty_unlock", "k1tty_lock"):
             set_phase("restore")

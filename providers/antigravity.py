@@ -94,6 +94,12 @@ class AntigravityProvider(BaseProvider):
 
     def _write_gate(self, cid: str) -> list[str]:
         warns: list[str] = []
+        locked_p, msg_p = T.presence_locked(self.store.presence_dir, cid)
+        if locked_p:
+            raise RuntimeError(
+                f"Файлы диалога {self.name} сейчас заняты другим процессом "
+                f"(скорее всего {self.name}): {msg_p}. Закройте {self.name} и повторите."
+            )
         db = self.store.conversations_dir / f"{cid}.db"
         ok, msg = T.db_write_probe(db)
         if not ok:
@@ -283,6 +289,9 @@ class AntigravityProvider(BaseProvider):
 
     def probe_conv_lock_sync(self, cid: str | None = None) -> tuple[bool, str]:
         if cid:
+            locked_p, msg_p = T.presence_locked(self.store.presence_dir, cid)
+            if locked_p:
+                return True, f"Файл диалога {self.name} занят ({msg_p}). Закройте {self.name} и повторите."
             db = self.store.conversations_dir / f"{cid}.db"
             if db.is_file():
                 ok, msg = T.db_write_probe(db)

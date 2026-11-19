@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ctypes
 from dataclasses import dataclass
+import errno
 import json
 import os
 import re
@@ -10,6 +11,11 @@ import sqlite3
 import sys
 from datetime import datetime
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
 
 if os.name == "nt":
     try:
@@ -331,6 +337,31 @@ def regen_chunks(cdir: Path, new_bytes: bytes):
     for ci in range(total):
         part = new_bytes[ci * CHUNK_CAP:(ci + 1) * CHUNK_CAP]
         (cdir / f"{ci:08d}.jsonl").write_bytes(part)
+
+
+def presence_locked(presence_dir: Path, cid: str) -> tuple[bool, str]:
+    if os.name == "nt" or fcntl is None or not cid or Path(cid).name != cid or cid in (".", ".."):
+        return False, ""
+    lock_file = presence_dir / f"{cid}.lock"
+    if not lock_file.is_file():
+        return False, ""
+    fd = None
+    try:
+        fd = os.open(str(lock_file), os.O_RDONLY)
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(fd, fcntl.LOCK_UN)
+    except BlockingIOError:
+        return True, "presence lock активен"
+    except OSError as e:
+        if e.errno in (errno.EAGAIN, errno.EWOULDBLOCK, errno.EACCES):
+            return True, "presence lock активен"
+    finally:
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+    return False, ""
 
 
 def db_write_probe(db_path) -> tuple[bool, str]:

@@ -1,6 +1,23 @@
 from __future__ import annotations
 
-from compression import zstd as _zstd
+try:
+    from compression import zstd as _stdlib_zstd
+except ImportError:
+    try:
+        from backports import zstd as _stdlib_zstd
+    except ImportError:
+        _stdlib_zstd = None
+
+if _stdlib_zstd is None:
+    try:
+        import zstandard as _zstandard
+    except ImportError:
+        _zstandard = None
+else:
+    _zstandard = None
+
+_HAS_ZSTD = (_stdlib_zstd is not None) or (_zstandard is not None)
+
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import hashlib
@@ -29,16 +46,40 @@ class K1ttyPackError(RuntimeError):
     pass
 
 
-def _zstd_options(level: int, raw_len: int) -> dict[int, int]:
+def _zstd_wlog(raw_len: int) -> int:
     wlog = 20
     while (1 << wlog) < raw_len and wlog < 27:
         wlog += 1
-    opts = {
-        _zstd.CompressionParameter.compression_level: level,
-        _zstd.CompressionParameter.window_log: min(27, max(20, wlog)),
-        _zstd.CompressionParameter.enable_long_distance_matching: 1,
+    return min(27, max(20, wlog))
+
+
+def _zstd_options(level: int, raw_len: int) -> dict[int, int]:
+    return {
+        _stdlib_zstd.CompressionParameter.compression_level: level,
+        _stdlib_zstd.CompressionParameter.window_log: _zstd_wlog(raw_len),
+        _stdlib_zstd.CompressionParameter.enable_long_distance_matching: 1,
     }
-    return opts
+
+
+def _zstd_compress(raw: bytes, level: int) -> bytes:
+    if _stdlib_zstd is not None:
+        return _stdlib_zstd.compress(raw, options=_zstd_options(level, len(raw)))
+    if _zstandard is not None:
+        params = _zstandard.ZstdCompressionParameters.from_level(
+            level,
+            window_log=_zstd_wlog(len(raw)),
+            enable_ldm=True,
+        )
+        return _zstandard.ZstdCompressor(compression_params=params).compress(raw)
+    raise K1ttyPackError("Кодек zstd недоступен: установите zstandard или используйте Python 3.14+")
+
+
+def _zstd_decompress(packed: bytes, expected: int) -> bytes:
+    if _stdlib_zstd is not None:
+        return _stdlib_zstd.decompress(packed)
+    if _zstandard is not None:
+        return _zstandard.ZstdDecompressor().decompress(packed, max_output_size=expected + 1)
+    raise K1ttyPackError("Для распаковки блока zstd установите пакет zstandard или используйте Python 3.14+")
 
 
 def _lzma_dict(raw_len: int) -> int:
@@ -46,6 +87,18 @@ def _lzma_dict(raw_len: int) -> int:
     while d < raw_len and d < 64 * MIB:
         d *= 2
     return min(64 * MIB, max(1 * MIB, d))
+
+
+def _lzma_compress(raw: bytes, preset_level: int = 9 | lzma.PRESET_EXTREME) -> bytes:
+    filt = {
+        "id": lzma.FILTER_LZMA2,
+        "preset": preset_level,
+        "dict_size": _lzma_dict(len(raw)),
+        "lc": 3,
+        "lp": 0,
+        "pb": 0,
+    }
+    return lzma.compress(raw, format=lzma.FORMAT_XZ, check=lzma.CHECK_CRC64, filters=[filt])
 
 
 def _encode_block(raw: bytes, preset: str) -> tuple[str, bytes]:
@@ -59,30 +112,31 @@ def _encode_block(raw: bytes, preset: str) -> tuple[str, bytes]:
             best = data
 
     if preset == "fast":
-        try_codec("zstd", _zstd.compress(raw, options=_zstd_options(6, len(raw))))
+        if _HAS_ZSTD:
+            try_codec("zstd", _zstd_compress(raw, 6))
+        else:
+            try_codec("lzma2", _lzma_compress(raw, 3))
     elif preset == "balanced":
-        try_codec("zstd", _zstd.compress(raw, options=_zstd_options(19, len(raw))))
+        if _HAS_ZSTD:
+            try_codec("zstd", _zstd_compress(raw, 19))
+        else:
+            try_codec("lzma2", _lzma_compress(raw, 6))
     else:
         def _run_zstd():
-            return "zstd", _zstd.compress(raw, options=_zstd_options(22, len(raw)))
+            return "zstd", _zstd_compress(raw, 22)
 
         def _run_lzma():
-            filt = {
-                "id": lzma.FILTER_LZMA2,
-                "preset": 9 | lzma.PRESET_EXTREME,
-                "dict_size": _lzma_dict(len(raw)),
-                "lc": 3,
-                "lp": 0,
-                "pb": 0,
-            }
-            return "lzma2", lzma.compress(raw, format=lzma.FORMAT_XZ, check=lzma.CHECK_CRC64, filters=[filt])
+            return "lzma2", _lzma_compress(raw)
 
-        with ThreadPoolExecutor(max_workers=2) as race:
-            fz = race.submit(_run_zstd)
-            fl = race.submit(_run_lzma)
-            for fut in (fz, fl):
-                c_name, c_data = fut.result()
-                try_codec(c_name, c_data)
+        if _HAS_ZSTD:
+            with ThreadPoolExecutor(max_workers=2) as race:
+                fz = race.submit(_run_zstd)
+                fl = race.submit(_run_lzma)
+                for fut in (fz, fl):
+                    c_name, c_data = fut.result()
+                    try_codec(c_name, c_data)
+        else:
+            try_codec("lzma2", _lzma_compress(raw))
 
     return best_codec, best
 
@@ -93,7 +147,7 @@ def _decode_block(codec: str, packed: bytes, expected: int) -> bytes:
     if codec == "store":
         out = packed
     elif codec == "zstd":
-        out = _zstd.decompress(packed)
+        out = _zstd_decompress(packed, expected)
     elif codec == "lzma2":
         dec = lzma.LZMADecompressor(format=lzma.FORMAT_XZ, memlimit=256 * MIB)
         out = dec.decompress(packed, max_length=expected + 1)

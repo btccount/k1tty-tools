@@ -36,6 +36,20 @@ def codex_running() -> list:
     running = []
     try:
         import subprocess
+        if os.name != "nt":
+            out = subprocess.run(
+                ["ps", "-axo", "pid=,comm="],
+                capture_output=True, text=True, errors="replace", timeout=15,
+            ).stdout
+            for line in out.splitlines():
+                parts = line.strip().split(None, 1)
+                if len(parts) < 2:
+                    continue
+                pid_s, comm = parts[0], parts[1].strip()
+                low = comm.lower()
+                if "codex" in low or "/chatgpt.app/contents/macos/chatgpt" in low:
+                    running.append(f"{Path(comm).name} (PID {pid_s})")
+            return running
         out = subprocess.run(["tasklist", "/FO", "CSV", "/NH"], capture_output=True,
                              text=True, errors="replace", timeout=20).stdout
         seen = set()
@@ -664,7 +678,7 @@ _PROJECTION_TABLES = ("thread_items", "thread_turns", "thread_realtime_items", "
 def _backup_projection(tid: str, destination: Path):
     if not PROJECTION_DB.exists():
         return
-    src = sqlite3.connect(PROJECTION_DB.as_uri() + "?mode=ro", uri=True)
+    src = sqlite3.connect(PROJECTION_DB.resolve().as_uri() + "?mode=ro", uri=True)
     dst = sqlite3.connect(str(destination))
     try:
         src.execute("BEGIN")
@@ -1103,7 +1117,7 @@ def _code_variants(code: str) -> tuple[str, str]:
 def detect_thread_block(tid: str) -> dict | None:
     if PROJECTION_DB.is_file():
         try:
-            con = sqlite3.connect(f"file:///{PROJECTION_DB.as_posix()}?mode=ro", uri=True)
+            con = sqlite3.connect(PROJECTION_DB.resolve().as_uri() + "?mode=ro", uri=True)
             try:
                 row = con.execute("""
                     SELECT turn_id, status, error_json, rollout_ordinal
@@ -1192,17 +1206,15 @@ def _check_lock_writable(allow_real: bool = False):
 
 
 def _open_locked_rollout(path: Path):
-    if os.name == "nt":
-        from codex_io import lock_rollouts
-        from contextlib import contextmanager
+    from codex_io import lock_rollouts
+    from contextlib import contextmanager
 
-        @contextmanager
-        def _win_ctx():
-            with lock_rollouts([path]) as locks:
-                yield locks[path]
+    @contextmanager
+    def _locked_ctx():
+        with lock_rollouts([path]) as locks:
+            yield locks[path]
 
-        return _win_ctx()
-    return path.open("r+b")
+    return _locked_ctx()
 
 
 def _create_lock_backup(tid: str, tag: str, tail_file: Path, tail_offset: int, fh=None) -> Path:
