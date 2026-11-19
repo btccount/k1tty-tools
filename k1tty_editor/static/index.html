@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K1tty Tools</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500&family=Geist:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<svg class="svg-sprite" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+  <symbol id="i-history" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></symbol>
+  <symbol id="i-panel-close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><rect width="18" height="18" x="3" y="3" rx="3"/><path d="M9 3v18"/><path d="m15.5 15-3-3 3-3"/></symbol>
+  <symbol id="i-panel-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><rect width="18" height="18" x="3" y="3" rx="3"/><path d="M9 3v18"/><path d="m13.5 9 3 3-3 3"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></symbol>
+  <symbol id="i-warn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></symbol>
+  <symbol id="i-check-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></symbol>
+  <symbol id="i-unlock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></symbol>
+  <symbol id="i-external" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></symbol>
+  <symbol id="i-arrow-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></symbol>
+  <symbol id="i-arrow-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></symbol>
+  <symbol id="i-scissors" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><circle cx="6" cy="6" r="3"/><path d="M8.12 8.12 12 12"/><path d="M20 4 8.12 15.88"/><circle cx="6" cy="18" r="3"/><path d="M14.8 14.8 20 20"/></symbol>
+  <symbol id="i-restore" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
+  <symbol id="i-chev-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-chev-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-chev-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><path d="m18 15-6-6-6 6"/></symbol>
+  <symbol id="i-terminal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></symbol>
+  <symbol id="i-file-text" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/></symbol>
+  <symbol id="i-wrench" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></symbol>
+  <symbol id="i-loader" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></symbol>
+  <symbol id="i-cat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><path d="M12 5c.67 0 1.35.09 2 .26 1.78-2 5.03-2.84 6.42-2.26 1.4.58-.42 7-.42 7 .57 1.07 1 2.24 1 3.44C21 17.9 16.97 21 12 21s-9-3-9-7.56c0-1.25.5-2.4 1-3.44 0 0-1.89-6.42-.5-7 1.39-.58 4.72.23 6.5 2.23A9.04 9.04 0 0 1 12 5Z"/><path d="M8 14v.5"/><path d="M16 14v.5"/><path d="M11.25 16.25h1.5L12 17l-.75-.75Z"/></symbol>
+  <symbol id="i-brand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><path d="M4.5 15.5V4.5L9 8h6l4.5-3.5v11a4 4 0 0 1-4 4h-7a4 4 0 0 1-4-4Z"/><path d="M8.5 12.25h7"/><path d="M8.5 15.5h4.5"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></symbol>
+  <symbol id="i-repeat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></symbol>
+  <symbol id="i-package" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><path d="M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z"/><path d="M12 22V12"/><polyline points="3.29 7 12 12 20.71 7"/><path d="m7.5 4.27 9 5.15"/></symbol>
+  <symbol id="i-app-window" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><rect x="2" y="4" width="20" height="16" rx="3"/><path d="M2 9h20"/><path d="M6.5 6.5h.01"/><path d="M10 6.5h.01"/></symbol>
+  <symbol id="i-snowflake" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><line x1="2" x2="22" y1="12" y2="12"/><line x1="12" x2="12" y1="2" y2="22"/><path d="m20 16-4-4 4-4"/><path d="m4 8 4 4-4 4"/><path d="m16 4-4 4-4-4"/><path d="m8 20 4-4 4 4"/></symbol>
+</svg>
+
+<div class="top-loader" id="topLoader"></div>
+
+<div class="app" id="appRoot">
+
+  <aside class="drawer" id="drawer">
+    <div class="drawer-inner">
+      <div class="drawer-head">
+        <button class="brand" id="brandHome" data-i18n-title="overview_tip" title="Обзор хранилищ">
+          <svg class="brand-glyph" aria-hidden="true"><use href="#i-brand"/></svg>
+          <span class="brand-title">K1tty Tools</span>
+        </button>
+        <div class="head-actions">
+          <button class="btn icon-only ghost" id="importQuickBtn" data-i18n-title="import_k1tty" data-i18n-aria="import_k1tty" title="Импорт .k1tty" aria-label="Импорт .k1tty">
+            <svg class="ico"><use href="#i-upload"/></svg>
+          </button>
+          <button class="btn icon-only ghost" id="allBackupsBtn" data-i18n-title="backups" data-i18n-aria="backups" title="Резервные копии" aria-label="Резервные копии">
+            <svg class="ico"><use href="#i-history"/></svg>
+          </button>
+          <button class="btn icon-only ghost" id="refreshAllBtn" data-i18n-title="refresh" data-i18n-aria="refresh" title="Обновить" aria-label="Обновить">
+            <svg class="ico"><use href="#i-refresh"/></svg>
+          </button>
+          <button class="btn icon-only ghost" id="drawerCloseBtn" data-i18n-title="hide_sidebar" data-i18n-aria="hide_sidebar" title="Скрыть панель" aria-label="Скрыть панель">
+            <svg class="ico"><use href="#i-panel-close"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="seg-wrap">
+        <div class="seg-control" id="providerTabs" role="tablist">
+          <span class="seg-thumb" id="segThumb"></span>
+          <button class="seg-btn active" data-prov="all" data-idx="0" role="tab" aria-selected="true" data-i18n-title="all" title="Все">
+            <span data-i18n="all">Все</span>
+            <span class="seg-cnt" id="cnt-all">0</span>
+          </button>
+          <button class="seg-btn" data-prov="antigravity" data-idx="1" role="tab" aria-selected="false" title="Antigravity">
+            <img class="ai-ico" src="/static/icons/antigravity.svg" alt="Antigravity">
+            <span class="seg-cnt" id="cnt-antigravity">0</span>
+          </button>
+          <button class="seg-btn" data-prov="antigravity_cli" data-idx="2" role="tab" aria-selected="false" title="Antigravity CLI">
+            <img class="ai-ico" src="/static/icons/antigravity-cli.svg" alt="Antigravity CLI">
+            <span class="seg-cnt" id="cnt-antigravity_cli">0</span>
+          </button>
+          <button class="seg-btn" data-prov="codex" data-idx="3" role="tab" aria-selected="false" title="Codex">
+            <img class="ai-ico" src="/static/icons/codex.svg" alt="Codex">
+            <span class="seg-cnt" id="cnt-codex">0</span>
+          </button>
+          <button class="seg-btn" data-prov="claude" data-idx="4" role="tab" aria-selected="false" title="Claude">
+            <img class="ai-ico" src="/static/icons/claude.svg" alt="Claude">
+            <span class="seg-cnt" id="cnt-claude">0</span>
+          </button>
+          <button class="seg-btn" data-prov="opencode" data-idx="5" role="tab" aria-selected="false" title="OpenCode">
+            <img class="ai-ico" src="/static/icons/opencode.svg" alt="OpenCode">
+            <span class="seg-cnt" id="cnt-opencode">0</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="search-wrap">
+        <svg class="ico search-ico"><use href="#i-search"/></svg>
+        <input type="text" id="searchInput" class="search-input" data-i18n-placeholder="search" placeholder="Поиск" autocomplete="off" spellcheck="false">
+        <kbd class="kbd search-kbd" id="searchKbd">/</kbd>
+        <button class="search-clear hidden" id="searchClear" data-i18n-aria="clear" aria-label="Очистить">
+          <svg class="ico"><use href="#i-x"/></svg>
+        </button>
+      </div>
+
+      <div class="conv-list-wrap" id="convListWrap">
+        <div class="conv-list" id="convList"></div>
+      </div>
+
+      <div class="drawer-foot">
+        <a class="drawer-tg" href="https://t.me/k1ttyfthoughts" target="_blank" rel="noopener" data-i18n-title="tg_channel" title="Telegram-канал">
+          <img src="/static/icons/telegram.svg" alt="Telegram">
+          <span>@k1ttyfthoughts</span>
+          <svg class="ico drawer-tg-ext"><use href="#i-external"/></svg>
+        </a>
+        <button class="btn icon-only ghost" id="catToggleBtn" data-i18n-title="cat_toggle" data-i18n-aria="cat_toggle" title="Котик за курсором" aria-label="Котик за курсором">
+          <svg class="ico"><use href="#i-cat"/></svg>
+        </button>
+        <button class="btn icon-only ghost" id="openWelcomeBtn" data-i18n-title="about" data-i18n-aria="about" title="О K1tty Tools" aria-label="О K1tty Tools">
+          <svg class="ico"><use href="#i-info"/></svg>
+        </button>
+      </div>
+    </div>
+  </aside>
+
+  <div class="drawer-backdrop" id="drawerBackdrop"></div>
+
+  <div class="main-col">
+
+    <header class="topbar">
+      <button class="btn icon-only ghost" id="drawerOpenBtn" data-i18n-title="show_sidebar" data-i18n-aria="show_sidebar" title="Показать панель" aria-label="Показать панель">
+        <svg class="ico"><use href="#i-panel-open"/></svg>
+      </button>
+
+      <div class="top-thread-info" id="topThreadInfo">
+        <span class="top-ai-badge hidden" id="threadProvBadge"></span>
+        <h1 class="top-title" id="threadTitle">Overview</h1>
+        <span class="top-meta hidden" id="threadMeta"></span>
+      </div>
+
+      <div class="spacer"></div>
+
+      <div class="top-controls" id="threadControls">
+        <button class="btn status-pill hidden" id="threadStatusBtn" title="" aria-label="Статус">
+          <svg class="ico"><use href="#i-app-window"/></svg>
+          <span class="status-pill-txt"></span>
+        </button>
+        <button class="btn hidden" id="threadLockBtn" title="Заблокировать чат">
+          <svg class="ico"><use href="#i-lock"/></svg>
+          <span data-i18n="lock">Забанить</span>
+        </button>
+        <button class="btn hidden" id="toggleSysBtn" data-i18n-title="service_tip" title="Команды, выводы и размышления">
+          <svg class="ico"><use href="#i-sliders"/></svg>
+          <span data-i18n="service">Служебные</span>
+        </button>
+        <button class="btn icon-only ghost hidden" id="threadConvertBtn" data-i18n-title="convert_chat" data-i18n-aria="convert_chat" title="Конвертировать" aria-label="Конвертировать">
+          <svg class="ico"><use href="#i-repeat"/></svg>
+        </button>
+        <button class="btn icon-only ghost hidden" id="threadExportBtn" data-i18n-title="export_k1tty" data-i18n-aria="export_k1tty" title="Экспорт .k1tty" aria-label="Экспорт .k1tty">
+          <svg class="ico"><use href="#i-download"/></svg>
+        </button>
+        <button class="btn hidden" id="threadBackupsBtn" data-i18n-title="backups" title="Резервные копии">
+          <svg class="ico"><use href="#i-history"/></svg>
+          <span data-i18n="backups_short">Копии</span>
+        </button>
+        <button class="btn icon-only ghost hidden" id="threadReloadBtn" data-i18n-title="refresh" data-i18n-aria="refresh" title="Обновить" aria-label="Обновить">
+          <svg class="ico"><use href="#i-refresh"/></svg>
+        </button>
+
+        <span class="top-sep hidden" id="topThreadSep"></span>
+
+        <button class="btn icon-only ghost" id="winterBtn" data-i18n-title="winter_tip" data-i18n-aria="winter_tip" title="Winter theme" aria-label="Winter theme" aria-pressed="true">
+          <svg class="ico"><use href="#i-snowflake"/></svg>
+        </button>
+
+        <button class="btn icon-only ghost" id="privacyBtn" data-i18n-title="privacy_tip" data-i18n-aria="privacy_tip" title="Скрыть названия" aria-label="Скрыть названия" aria-pressed="false">
+          <svg class="ico"><use href="#i-eye"/></svg>
+        </button>
+
+        <div class="lang-switch" id="langSwitch" role="group" aria-label="Language">
+          <button type="button" class="lang-btn" data-lang="uk">UA</button>
+          <button type="button" class="lang-btn" data-lang="ru">RU</button>
+          <button type="button" class="lang-btn active" data-lang="en">EN</button>
+        </div>
+      </div>
+    </header>
+
+    <div class="main-body">
+      <section class="overview" id="overviewPane">
+        <div class="overview-inner">
+          <div class="ov-head">
+            <div>
+              <h2 class="ov-title" data-i18n="ov_title">Локальный архив</h2>
+              <p class="ov-sub" data-i18n="ov_sub">Диалоги Antigravity, Antigravity CLI, Codex, Claude и OpenCode на этом диске</p>
+            </div>
+            <div class="ov-head-actions">
+              <button class="btn" id="ovImportBtn">
+                <svg class="ico"><use href="#i-upload"/></svg>
+                <span data-i18n="import_short">Импорт</span>
+              </button>
+              <button class="btn" id="ovBackupsBtn">
+                <svg class="ico"><use href="#i-history"/></svg>
+                <span data-i18n="backups">Резервные копии</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="ov-stats" id="ovStats"></div>
+
+          <div class="ov-columns">
+            <div class="ov-panel">
+              <div class="ov-panel-head">
+                <span class="ov-panel-title" data-i18n="storages">Хранилища</span>
+                <span class="ov-panel-meta" id="ovTotalSize"></span>
+              </div>
+              <div class="share-wrap">
+                <div class="share-bar" id="ovShareBar"></div>
+                <div class="share-legend" id="ovShareLegend"></div>
+              </div>
+              <div class="prov-list" id="provGrid"></div>
+            </div>
+
+            <div class="ov-panel">
+              <div class="ov-panel-head">
+                <span class="ov-panel-title" data-i18n="recent">Недавние</span>
+                <span class="ov-panel-meta" id="ovRecentMeta"></span>
+              </div>
+              <div class="recent-list" id="ovRecent"></div>
+            </div>
+          </div>
+
+          <div class="ov-panel ov-bk-panel" id="ovBackupsPanel">
+            <div class="ov-panel-head ov-bk-head">
+              <div class="ov-bk-title-wrap">
+                <span class="ov-panel-title" data-i18n="ov_backups_title">Резервные копии и вес на диске</span>
+                <span class="ov-panel-meta" id="ovBkTotalMeta"></span>
+              </div>
+              <div class="ov-bk-actions">
+                <label class="switch-pill" id="ovAutoBackupWrap" data-i18n-title="auto_backup_tip" title="Автоматически создавать копию перед правкой и удалением">
+                  <input type="checkbox" id="ovAutoBackupToggle" checked>
+                  <span class="switch-track"><span class="switch-knob"></span></span>
+                  <span class="switch-label" data-i18n="auto_backup">Автобекап</span>
+                  <span class="switch-state" id="ovAutoBackupState">ON</span>
+                </label>
+                <button class="btn sm" id="ovBkExploreBtn">
+                  <svg class="ico"><use href="#i-history"/></svg>
+                  <span data-i18n="explore">Исследовать</span>
+                </button>
+                <button class="btn sm danger hidden" id="ovBkCleanBtn">
+                  <svg class="ico"><use href="#i-trash"/></svg>
+                  <span data-i18n="clean_all">Очистить</span>
+                </button>
+              </div>
+            </div>
+            <div class="disk-split-wrap" id="ovDiskSplit"></div>
+            <div class="share-wrap" id="ovBkShareWrap">
+              <div class="share-bar" id="ovBkShareBar"></div>
+              <div class="share-legend" id="ovBkShareLegend"></div>
+            </div>
+            <div class="ov-bk-grid" id="ovBkGrid"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="chat-wrap hidden" id="chatWrap">
+        <div class="backup-banner hidden" id="backupBanner">
+          <svg class="ico"><use href="#i-eye"/></svg>
+          <span class="backup-banner-title" data-i18n="bk_research_banner">Режим исследования копии · Только чтение</span>
+          <span class="mono-tag" id="backupBannerName"></span>
+          <span class="spacer"></span>
+          <button class="btn sm" id="backupBackToListBtn">
+            <svg class="ico"><use href="#i-history"/></svg>
+            <span data-i18n="backups_short">Копии</span>
+          </button>
+          <button class="btn sm" id="backupExitBtn">
+            <svg class="ico"><use href="#i-x"/></svg>
+            <span data-i18n="exit_research">Выйти</span>
+          </button>
+        </div>
+
+        <div class="running-banner hidden" id="runningGuardBanner">
+          <svg class="ico"><use href="#i-app-window"/></svg>
+          <span class="running-banner-txt" id="runningGuardText"></span>
+        </div>
+
+        <div class="feed-scroll" id="feedScroll">
+          <div class="feed-inner">
+            <div class="more-bar" id="moreWrap"></div>
+            <div class="feed" id="chatFeed"></div>
+
+            <article class="unlocker-inline hidden" id="unlockerCard" aria-label="K1tty Tools Chat Unlocker">
+              <div class="msg-head">
+                <span class="role-chip"><svg class="ico"><use href="#i-lock"/></svg></span>
+                <span class="msg-who">K1tty Tools</span>
+                <span class="mono-tag hidden" id="unlockerCatTag"></span>
+                <span class="mono-tag hidden" id="unlockerCodeTag"></span>
+              </div>
+              <div class="unlocker-body">
+                <div class="unlocker-prompt" id="unlockerPrompt">Этот диалог заблокирован. Хотите снять блокировку?</div>
+                <div class="unlocker-reason-line" id="unlockerReasonText"></div>
+              </div>
+              <div class="msg-actions">
+                <button class="btn sm primary" id="unlockerApplyBtn">
+                  <svg class="ico"><use href="#i-unlock"/></svg><span data-i18n="yes">Да</span>
+                </button>
+                <button class="btn sm" id="unlockerDismissBtn">
+                  <span data-i18n="no">Нет</span>
+                </button>
+              </div>
+            </article>
+          </div>
+        </div>
+
+        <button class="btn icon-only scroll-bottom hidden" id="scrollBottomBtn" data-i18n-title="scroll_bottom" data-i18n-aria="scroll_bottom" title="Вниз" aria-label="Вниз">
+          <svg class="ico"><use href="#i-arrow-down"/></svg>
+        </button>
+      </section>
+    </div>
+  </div>
+</div>
+
+<div class="ctx-menu hidden" id="ctxMenu" role="menu">
+  <button class="ctx-item" data-ctx="open">
+    <svg class="ico"><use href="#i-external"/></svg>
+    <span data-i18n="open">Открыть</span>
+  </button>
+  <button class="ctx-item" data-ctx="export">
+    <svg class="ico"><use href="#i-download"/></svg>
+    <span data-i18n="export_k1tty">Экспорт .k1tty</span>
+  </button>
+  <button class="ctx-item" data-ctx="convert">
+    <svg class="ico"><use href="#i-repeat"/></svg>
+    <span data-i18n="convert_chat">Конвертировать</span>
+  </button>
+  <button class="ctx-item" data-ctx="backups">
+    <svg class="ico"><use href="#i-history"/></svg>
+    <span data-i18n="backups">Резервные копии</span>
+  </button>
+  <button class="ctx-item" data-ctx="copy-id">
+    <svg class="ico"><use href="#i-copy"/></svg>
+    <span data-i18n="copy_id">Копировать ID</span>
+  </button>
+  <button class="ctx-item hidden" data-ctx="lock-chat" id="ctxLockBtn">
+    <svg class="ico"><use href="#i-lock"/></svg>
+    <span data-i18n="lock_chat">Забанить чат</span>
+  </button>
+  <div class="ctx-sep"></div>
+  <button class="ctx-item danger arm-btn" data-ctx="delete-conv" id="ctxDeleteBtn">
+    <svg class="ico"><use href="#i-trash"/></svg>
+    <span class="arm-label" data-i18n="delete_conv">Удалить диалог</span>
+    <span class="arm-bar"></span>
+  </button>
+</div>
+
+<div class="jobbar hidden" id="jobBar">
+  <div class="job-row">
+    <span class="job-label"><svg class="ico spin"><use href="#i-loader"/></svg><span id="jobPhase" data-i18n="phase_running">Выполнение</span></span>
+    <span class="job-pct" id="jobPct">0%</span>
+  </div>
+  <div class="job-track"><div class="job-fill" id="jobFill"></div></div>
+</div>
+
+<div class="modal-bg" id="editModal">
+  <div class="modal modal-lg">
+    <div class="modal-head">
+      <div class="modal-title-wrap">
+        <svg class="ico"><use href="#i-edit"/></svg>
+        <h3 id="editTitle" data-i18n="edit">Изменить</h3>
+      </div>
+      <button class="btn icon-only ghost" data-close="editModal" data-i18n-aria="close" aria-label="Закрыть"><svg class="ico"><use href="#i-x"/></svg></button>
+    </div>
+    <textarea id="editText" class="textarea" spellcheck="false"></textarea>
+    <div class="modal-foot">
+      <div class="spacer"></div>
+      <button class="btn" data-close="editModal" data-i18n="cancel">Отмена</button>
+      <button class="btn primary" id="editApplyBtn"><svg class="ico"><use href="#i-check"/></svg><span data-i18n="save">Сохранить</span></button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="cutModal">
+  <div class="modal">
+    <div class="modal-head">
+      <div class="modal-title-wrap">
+        <svg class="ico"><use href="#i-scissors"/></svg>
+        <h3 id="cutTitle" data-i18n="cut">Обрезка</h3>
+      </div>
+      <button class="btn icon-only ghost" data-close="cutModal" data-i18n-aria="close" aria-label="Закрыть"><svg class="ico"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="stat-grid" id="cutStats"></div>
+    <div class="preview-list" id="cutPreview"></div>
+    <div class="modal-foot">
+      <div class="spacer"></div>
+      <button class="btn" data-close="cutModal" data-i18n="cancel">Отмена</button>
+      <button class="btn danger arm-btn" id="cutApplyBtn" disabled>
+        <svg class="ico"><use href="#i-trash"/></svg>
+        <span class="arm-label" data-i18n="delete">Удалить</span>
+        <span class="arm-bar"></span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="repModal">
+  <div class="modal">
+    <div class="modal-head">
+      <div class="modal-title-wrap">
+        <svg class="ico"><use href="#i-check-circle"/></svg>
+        <h3 id="repTitle" data-i18n="done">Готово</h3>
+      </div>
+      <button class="btn icon-only ghost" data-close="repModal" data-i18n-aria="close" aria-label="Закрыть"><svg class="ico"><use href="#i-x"/></svg></button>
+    </div>
+    <div id="repBody"></div>
+    <div class="modal-foot">
+      <div class="spacer"></div>
+      <button class="btn primary" id="repCloseBtn" data-i18n="done">Готово</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="bkModal">
+  <div class="modal modal-lg">
+    <div class="modal-head">
+      <div class="modal-title-wrap">
+        <svg class="ico"><use href="#i-history"/></svg>
+        <h3 id="bkTitle" data-i18n="backups">Резервные копии</h3>
+        <span class="mono-tag hidden" id="bkTotalBadge"></span>
+      </div>
+      <button class="btn icon-only ghost" data-close="bkModal" data-i18n-aria="close" aria-label="Закрыть"><svg class="ico"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="preview-list bk-list" id="bkList"></div>
+    <div class="modal-foot">
+      <label class="switch-pill" id="bkAutoBackupWrap" data-i18n-title="auto_backup_tip" title="Автоматически создавать копию перед правкой и удалением">
+        <input type="checkbox" id="bkAutoBackupToggle" checked>
+        <span class="switch-track"><span class="switch-knob"></span></span>
+        <span class="switch-label" data-i18n="auto_backup">Автобекап</span>
+        <span class="switch-state" id="bkAutoBackupState">ON</span>
+      </label>
+      <button class="btn danger hidden" id="bkDeleteAllBtn">
+        <svg class="ico"><use href="#i-trash"/></svg>
+        <span data-i18n="delete_all_backups">Удалить все копии</span>
+      </button>
+      <div class="spacer"></div>
+      <button class="btn" data-close="bkModal" data-i18n="close">Закрыть</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="deleteAllBkModal">
+  <div class="modal modal-sm">
+    <div class="modal-head">
+      <div class="modal-title-wrap">
+        <svg class="ico"><use href="#i-warn"/></svg>
+        <h3 data-i18n="delete_all_bk_title">Удалить все резервные копии</h3>
+      </div>
+      <button class="btn icon-only ghost" data-close="deleteAllBkModal" data-i18n-aria="close" aria-label="Закрыть"><svg class="ico"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="note err" id="deleteAllBkWarn">
+      <svg class="ico"><use href="#i-warn"/></svg>
+      <span data-i18n="delete_all_bk_warn">Все выбранные резервные копии будут безвозвратно удалены с диска.</span>
+    </div>
+    <div class="del-bk-list" id="deleteAllBkList"></div>
+    <div class="del-bk-total" id="deleteAllBkTotal"></div>
+    <div class="modal-foot">
+      <div class="spacer"></div>
+      <button class="btn" data-close="deleteAllBkModal" data-i18n="cancel">Отмена</button>
+      <button class="btn danger-solid" id="deleteAllBkConfirmBtn">
+        <svg class="ico"><use href="#i-trash"/></svg>
+        <span data-i18n="delete_all_confirm">Удалить всё</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="exportModal">
+  <div class="modal modal-sm">
+    <div class="modal-head">
+      <div class="modal-title-wrap">
+        <svg class="ico"><use href="#i-package"/></svg>
+        <h3 data-i18n="export_k1tty">Экспорт .k1tty</h3>
+      </div>
+      <button class="btn icon-only ghost" data-close="exportModal" data-i18n-aria="close" aria-label="Закрыть"><svg class="ico"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="chat-pill" id="exportChatPill"></div>
+    <div class="field-label" data-i18n="compression_preset">Сжатие</div>
+    <div class="preset-grid" id="exportPresetGrid">
+      <button type="button" class="preset-card" data-pack-preset="fast">
+        <span class="preset-card-name" data-i18n="preset_fast">Быстрый</span>
+        <span class="preset-card-meta">Zstd-6 · LDM</span>
+      </button>
+      <button type="button" class="preset-card active" data-pack-preset="balanced">
+        <span class="preset-card-name" data-i18n="preset_balanced">Баланс</span>
+        <span class="preset-card-meta">Zstd-19 · LDM</span>
+      </button>
+      <button type="button" class="preset-card" data-pack-preset="ultra">
+        <span class="preset-card-name" data-i18n="preset_ultra">Ультра</span>
+        <span class="preset-card-meta">Zstd-22 / LZMA2</span>
+      </button>
+    </div>
+    <label class="check-row">
+      <input type="checkbox" id="exportIncludeTools" checked>
+      <span data-i18n="include_service_steps">Включить служебные шаги</span>
+    </label>
+    <div class="pack-result hidden" id="exportResult"></div>
+    <div class="modal-foot">
+      <div class="spacer"></div>
+      <button class="btn" data-close="exportModal" data-i18n="close">Закрыть</button>
+      <button class="btn primary" id="exportApplyBtn">
+        <svg class="ico"><use href="#i-download"/></svg>
+        <span data-i18n="export_btn">Экспортировать</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="convertModal">
+  <div class="modal modal-sm">
+    <div class="modal-head">
+      <div class="modal-title-wrap">
+        <svg class="ico"><use href="#i-repeat"/></svg>
+        <h3 data-i18n="convert_title">Конвертировать чат</h3>
+      </div>
+      <button class="btn icon-only ghost" data-close="convertModal" data-i18n-aria="close" aria-label="Закрыть"><svg class="ico"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="chat-pill" id="convertChatPill"></div>
+    <div class="field-label" data-i18n="target_provider">Целевая среда</div>
+    <div class="prov-pick-grid" id="convertTargetGrid"></div>
+    <label class="field-label" for="convertTitleInput" data-i18n="chat_title_lbl">Название чата</label>
+    <input id="convertTitleInput" class="text-input" type="text" spellcheck="false">
+    <label class="check-row">
+      <input type="checkbox" id="convertIncludeTools">
+      <span data-i18n="include_service_steps">Включить служебные шаги</span>
+    </label>
+    <div class="modal-foot">
+      <div class="spacer"></div>
+      <button class="btn" data-close="convertModal" data-i18n="cancel">Отмена</button>
+      <button class="btn primary" id="convertApplyBtn">
+        <svg class="ico"><use href="#i-repeat"/></svg>
+        <span data-i18n="convert_btn">Конвертировать</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="importModal">
+  <div class="modal modal-sm">
+    <div class="modal-head">
+      <div class="modal-title-wrap">
+        <svg class="ico"><use href="#i-upload"/></svg>
+        <h3 data-i18n="import_k1tty">Импорт .k1tty</h3>
+      </div>
+      <button class="btn icon-only ghost" data-close="importModal" data-i18n-aria="close" aria-label="Закрыть"><svg class="ico"><use href="#i-x"/></svg></button>
+    </div>
+    <input type="file" id="importFileInput" accept=".k1tty" class="hidden">
+    <button type="button" class="drop-zone" id="importDropZone">
+      <svg class="ico"><use href="#i-package"/></svg>
+      <span class="drop-zone-title" id="importDropTitle" data-i18n="drop_k1tty_hint">Выберите или перетащите файл .k1tty</span>
+      <span class="drop-zone-meta" id="importDropMeta"></span>
+    </button>
+    <div class="pack-result hidden" id="importInspectCard"></div>
+    <div class="field-label" data-i18n="target_provider">Целевая среда</div>
+    <div class="prov-pick-grid" id="importTargetGrid"></div>
+    <label class="field-label" for="importTitleInput" data-i18n="chat_title_lbl">Название чата</label>
+    <input id="importTitleInput" class="text-input" type="text" spellcheck="false">
+    <label class="check-row">
+      <input type="checkbox" id="importIncludeTools" checked>
+      <span data-i18n="include_service_steps">Включить служебные шаги</span>
+    </label>
+    <div class="modal-foot">
+      <div class="spacer"></div>
+      <button class="btn" data-close="importModal" data-i18n="cancel">Отмена</button>
+      <button class="btn primary" id="importApplyBtn" disabled>
+        <svg class="ico"><use href="#i-upload"/></svg>
+        <span data-i18n="import_btn">Импортировать</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="lockModal">
+  <div class="modal modal-sm">
+    <div class="modal-head">
+      <div class="modal-title-wrap">
+        <svg class="ico"><use href="#i-lock"/></svg>
+        <h3 data-i18n="lock_modal_title">Заблокировать чат</h3>
+      </div>
+      <button class="btn icon-only ghost" data-close="lockModal" data-i18n-aria="close" aria-label="Закрыть"><svg class="ico"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="preset-chips" id="lockPresets"></div>
+    <label class="field-label" for="lockReasonInput" data-i18n="lock_reason_lbl">Текст ошибки</label>
+    <textarea id="lockReasonInput" class="textarea textarea-sm" rows="3" spellcheck="false" data-i18n-placeholder="lock_reason_ph" placeholder="Причина блокировки"></textarea>
+    <label class="field-label" for="lockCodeInput" data-i18n="lock_code_lbl">Код политики</label>
+    <input id="lockCodeInput" class="text-input" type="text" spellcheck="false" placeholder="misalignmentPolicyViolation">
+    <div class="modal-foot">
+      <div class="spacer"></div>
+      <button class="btn" data-close="lockModal" data-i18n="cancel">Отмена</button>
+      <button class="btn danger-solid" id="lockApplyBtn">
+        <svg class="ico"><use href="#i-lock"/></svg><span data-i18n="lock_apply">Заблокировать</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg welcome-bg" id="welcomeModal">
+  <div class="modal welcome-sheet">
+    <div class="welcome-icons w-stagger" style="--d: 0">
+      <span class="w-ico"><img src="/static/icons/antigravity.svg" alt="Antigravity"></span>
+      <span class="w-ico"><img src="/static/icons/antigravity-cli.svg" alt="Antigravity CLI"></span>
+      <span class="w-ico"><img src="/static/icons/codex.svg" alt="Codex"></span>
+      <span class="w-ico"><img src="/static/icons/claude.svg" alt="Claude"></span>
+      <span class="w-ico"><img src="/static/icons/opencode.svg" alt="OpenCode"></span>
+    </div>
+    <h2 class="welcome-title w-stagger" style="--d: 1">K1tty Tools</h2>
+    <p class="welcome-desc w-stagger" style="--d: 2" data-i18n="welcome_desc">Редактируй и чисти чаты, снимай баны и откатывай историю в пару кликов</p>
+    <a class="welcome-tg w-stagger" style="--d: 3" href="https://t.me/k1ttyfthoughts" target="_blank" rel="noopener">
+      <img class="welcome-tg-ico" src="/static/icons/telegram.svg" alt="Telegram">
+      <span class="welcome-tg-info">
+        <span class="welcome-tg-label" data-i18n="tg_channel">Telegram-канал</span>
+        <span class="welcome-tg-handle">@k1ttyfthoughts</span>
+      </span>
+      <svg class="ico welcome-tg-arrow"><use href="#i-external"/></svg>
+    </a>
+    <button class="btn primary welcome-cta w-stagger" style="--d: 4" id="welcomeStartBtn">
+      <span data-i18n="continue">Продолжить</span>
+    </button>
+    <div class="welcome-sign w-stagger" style="--d: 5" id="welcomeSign">с любовью от <span>quesada &amp; котик &lt;3</span></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="/static/winter.js"></script>
+<script src="/static/app.js"></script>
+<script src="/static/pixel-cat.js"></script>
+</body>
+</html>
