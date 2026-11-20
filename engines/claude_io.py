@@ -19,7 +19,37 @@ def win_long_path(p: Path | str) -> str:
 @contextmanager
 def lock_files(paths):
     if os.name != "nt":
-        yield {p: None for p in paths}
+        import errno
+        import fcntl
+
+        handles = []
+        opened_paths = []
+        try:
+            for path in paths:
+                p_str = win_long_path(path)
+                if not os.path.exists(p_str):
+                    continue
+                fh = open(p_str, "r+b", buffering=1024 * 1024)
+                try:
+                    fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except OSError as e:
+                    fh.close()
+                    if e.errno in (errno.EAGAIN, errno.EWOULDBLOCK, errno.EACCES):
+                        raise OSError(e.errno, f"Файл занят другим процессом или недоступен: {path}") from e
+                    raise
+                handles.append(fh)
+                opened_paths.append(path)
+            yield dict(zip(opened_paths, handles))
+        finally:
+            for handle in reversed(handles):
+                try:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                except OSError:
+                    pass
+                try:
+                    handle.close()
+                except Exception:
+                    pass
         return
 
     import ctypes

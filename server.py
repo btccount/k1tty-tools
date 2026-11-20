@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import json
 import os
 import sys
@@ -11,9 +12,9 @@ import uuid
 import webbrowser
 from pathlib import Path
 
-if sys.version_info < (3, 14):
+if sys.version_info < (3, 10):
     sys.exit(
-        f"K1tty Tools requires Python 3.14 or newer (found {sys.version.split()[0]}).\n"
+        f"K1tty Tools requires Python 3.10 or newer (found {sys.version.split()[0]}).\n"
         "Install it from https://www.python.org/downloads/ or run with uv: "
         "uv run --python 3.14 --with-requirements requirements.txt python -X utf8 server.py"
     )
@@ -63,16 +64,19 @@ class AppRunningError(RuntimeError):
     pass
 
 
+_LOCK_ERRNOS = frozenset({13, 32, errno.EACCES, errno.EAGAIN, errno.EWOULDBLOCK})
+
+
 def _is_expected_error(e: Exception) -> bool:
-    if isinstance(e, (AppRunningError, PermissionError, ValueError, FileNotFoundError, KP.K1ttyPackError)):
+    if isinstance(e, (AppRunningError, BlockingIOError, PermissionError, ValueError, FileNotFoundError, KP.K1ttyPackError)):
         return True
-    if isinstance(e, OSError) and getattr(e, "errno", None) in (13, 32):
+    if isinstance(e, OSError) and getattr(e, "errno", None) in _LOCK_ERRNOS:
         return True
     return False
 
 
 def _format_client_error(e: Exception) -> str:
-    if isinstance(e, OSError) and getattr(e, "errno", None) in (13, 32):
+    if isinstance(e, BlockingIOError) or (isinstance(e, OSError) and getattr(e, "errno", None) in _LOCK_ERRNOS):
         return "Файл занят запущенным приложением. Закройте приложение и повторите."
     if _is_expected_error(e):
         return str(e)

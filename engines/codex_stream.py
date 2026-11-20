@@ -162,9 +162,11 @@ def sandbox_cut(tid, key, expected_revision, mode="tail", phase=lambda _: None, 
         raise ValueError("Недопустимый идентификатор треда")
     path = files[0]
     with lock_rollouts(files) as locks:
-        con = sqlite3.connect(str(C.PROJECTION_DB), timeout=3)
+        has_proj = C.PROJECTION_DB.is_file()
+        con = sqlite3.connect(str(C.PROJECTION_DB), timeout=3) if has_proj else None
         try:
-            con.execute("BEGIN IMMEDIATE")
+            if con is not None:
+                con.execute("BEGIN IMMEDIATE")
             if not expected_revision or revision(tid) != expected_revision:
                 raise RuntimeError("История изменилась после предпросмотра")
             if mode not in ("head", "tail", "edit"):
@@ -183,7 +185,9 @@ def sandbox_cut(tid, key, expected_revision, mode="tail", phase=lambda _: None, 
                 bdir = C.CODEX_HOME.parent / "codex_backups" / tid / (ts + "-stream")
                 dest = bdir / "sessions" / path.relative_to(C.SESSIONS)
                 required = path.stat().st_size * (1 if mode == "tail" else 2)
-                required += C.PROJECTION_DB.stat().st_size + 64 * 1024 * 1024
+                if has_proj:
+                    required += C.PROJECTION_DB.stat().st_size
+                required += 64 * 1024 * 1024
                 if shutil.disk_usage(C.CODEX_HOME.parent).free < required:
                     raise OSError("Недостаточно места для резервной копии и временного файла")
                 dest.parent.mkdir(parents=True, exist_ok=False)
@@ -193,14 +197,16 @@ def sandbox_cut(tid, key, expected_revision, mode="tail", phase=lambda _: None, 
                     raise IOError("Резервная копия неполная")
                 if _sha256_file(dest) != checksum:
                     raise IOError("Контрольная сумма резервной копии не совпадает")
-                C._backup_projection(tid, bdir / "projection.sqlite")
-                check = sqlite3.connect(str(bdir / "projection.sqlite"))
-                try:
-                    if check.execute("PRAGMA quick_check").fetchone()[0] != "ok":
-                        raise IOError("Резервная копия проекции повреждена")
-                finally:
-                    check.close()
-                projection_hash = _sha256_file(bdir / "projection.sqlite")
+                projection_hash = ""
+                if has_proj:
+                    C._backup_projection(tid, bdir / "projection.sqlite")
+                    check = sqlite3.connect(str(bdir / "projection.sqlite"))
+                    try:
+                        if check.execute("PRAGMA quick_check").fetchone()[0] != "ok":
+                            raise IOError("Резервная копия проекции повреждена")
+                    finally:
+                        check.close()
+                    projection_hash = _sha256_file(bdir / "projection.sqlite")
                 _write_json_sync(bdir / "backup.meta.json", {"tid": tid, "created": ts, "files": 1, "tag": "stream", "sha256": checksum, "projection_sha256": projection_hash})
                 marker = bdir / "transaction.json"
                 _write_json_sync(marker, {"status": "prepared", "operation": mode})
@@ -227,11 +233,13 @@ def sandbox_cut(tid, key, expected_revision, mode="tail", phase=lambda _: None, 
                     src.truncate(candidate.stat().st_size)
                 _sync(src)
                 counts = {}
-                for table in C._PROJECTION_TABLES:
-                    counts[table] = con.execute(f'DELETE FROM "{table}" WHERE thread_id=?', (tid,)).rowcount
-                con.commit()
+                if con is not None:
+                    for table in C._PROJECTION_TABLES:
+                        counts[table] = con.execute(f'DELETE FROM "{table}" WHERE thread_id=?', (tid,)).rowcount
+                    con.commit()
             except Exception as original:
-                con.rollback()
+                if con is not None and con.in_transaction:
+                    con.rollback()
                 if modified and dest is not None and dest.exists():
                     try:
                         src.seek(0)
@@ -257,9 +265,10 @@ def sandbox_cut(tid, key, expected_revision, mode="tail", phase=lambda _: None, 
             report.update(backup=str(bdir) if bdir is not None else None, projection=counts, leaks=None)
             return report
         finally:
-            if con.in_transaction:
-                con.rollback()
-            con.close()
+            if con is not None:
+                if con.in_transaction:
+                    con.rollback()
+                con.close()
 
 
 def sandbox_restore(bdir, phase=lambda _: None, allow_real=False):
@@ -273,7 +282,8 @@ def sandbox_restore(bdir, phase=lambda _: None, allow_real=False):
     sroot = bdir / "sessions"
     saved = list(sroot.rglob("rollout-*.jsonl"))
     snapshot = bdir / "projection.sqlite"
-    if len(saved) != 1 or meta.get("files") != 1 or not snapshot.is_file() or not meta.get("sha256") or not meta.get("projection_sha256"):
+    has_proj_snap = bool(meta.get("projection_sha256"))
+    if len(saved) != 1 or meta.get("files") != 1 or not meta.get("sha256") or (has_proj_snap and not snapshot.is_file()):
         raise ValueError("Поддерживаются только полные потоковые копии с контрольной суммой")
     backup_path = saved[0]
     if C._file_meta(backup_path)[0] != tid:
@@ -283,7 +293,8 @@ def sandbox_restore(bdir, phase=lambda _: None, allow_real=False):
         raise ValueError("Недопустимый путь файла треда")
     if not target.is_file():
         raise ValueError("Текущий rollout не найден; автоматическое восстановление невозможно")
-    with lock_rollouts([target, backup_path, snapshot]) as locks:
+    lock_targets = [target, backup_path] + ([snapshot] if snapshot.is_file() else [])
+    with lock_rollouts(lock_targets) as locks:
         src, saved_file = locks[target], locks[backup_path]
         saved_file.seek(0)
         digest = hashlib.sha256()
@@ -294,32 +305,37 @@ def sandbox_restore(bdir, phase=lambda _: None, allow_real=False):
             digest.update(chunk)
         if digest.hexdigest() != meta["sha256"]:
             raise ValueError("Контрольная сумма резервной копии не совпадает")
-        snapshot_file = locks[snapshot]
-        snapshot_file.seek(0)
-        digest = hashlib.sha256()
-        while True:
-            chunk = snapshot_file.read(1024 * 1024)
-            if not chunk:
-                break
-            digest.update(chunk)
-        if digest.hexdigest() != meta["projection_sha256"]:
-            raise ValueError("Контрольная сумма копии проекции не совпадает")
-        con = sqlite3.connect(str(C.PROJECTION_DB), timeout=3)
+        if has_proj_snap:
+            snapshot_file = locks[snapshot]
+            snapshot_file.seek(0)
+            digest = hashlib.sha256()
+            while True:
+                chunk = snapshot_file.read(1024 * 1024)
+                if not chunk:
+                    break
+                digest.update(chunk)
+            if digest.hexdigest() != meta["projection_sha256"]:
+                raise ValueError("Контрольная сумма копии проекции не совпадает")
+        has_live_proj = C.PROJECTION_DB.is_file()
+        con = sqlite3.connect(str(C.PROJECTION_DB), timeout=3) if has_live_proj else None
         try:
-            con.execute("ATTACH DATABASE ? AS saved", (str(snapshot),))
-            if con.execute("PRAGMA saved.quick_check").fetchone()[0] != "ok":
-                raise ValueError("Повреждена копия проекции")
-            for table in C._PROJECTION_TABLES:
-                current = [r[1] for r in con.execute(f'PRAGMA main.table_info("{table}")')]
-                archived = [r[1] for r in con.execute(f'PRAGMA saved.table_info("{table}")')]
-                if not current or current != archived or "thread_id" not in current:
-                    raise ValueError(f"Не совпадает схема таблицы {table}")
-            con.execute("BEGIN IMMEDIATE")
+            use_proj_snap = bool(con is not None and snapshot.is_file())
+            if con is not None:
+                if use_proj_snap:
+                    con.execute("ATTACH DATABASE ? AS saved", (str(snapshot),))
+                    if con.execute("PRAGMA saved.quick_check").fetchone()[0] != "ok":
+                        raise ValueError("Повреждена копия проекции")
+                    for table in C._PROJECTION_TABLES:
+                        current = [r[1] for r in con.execute(f'PRAGMA main.table_info("{table}")')]
+                        archived = [r[1] for r in con.execute(f'PRAGMA saved.table_info("{table}")')]
+                        if not current or current != archived or "thread_id" not in current:
+                            raise ValueError(f"Не совпадает схема таблицы {table}")
+                con.execute("BEGIN IMMEDIATE")
             phase("backup")
             ts = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
             undo = C.CODEX_HOME.parent / "codex_backups" / tid / (ts + "-before-restore")
             undo_file = undo / "sessions" / target.relative_to(C.SESSIONS)
-            required = target.stat().st_size + C.PROJECTION_DB.stat().st_size + 64 * 1024 * 1024
+            required = target.stat().st_size + (C.PROJECTION_DB.stat().st_size if has_live_proj else 0) + 64 * 1024 * 1024
             if shutil.disk_usage(C.CODEX_HOME.parent).free < required:
                 raise OSError("Недостаточно места для резервной копии текущего состояния")
             undo_file.parent.mkdir(parents=True, exist_ok=False)
@@ -333,8 +349,10 @@ def sandbox_restore(bdir, phase=lambda _: None, allow_real=False):
                     checksum.update(chunk)
                     out.write(chunk)
                 _sync(out)
-            C._backup_projection(tid, undo / "projection.sqlite")
-            undo_projection_hash = _sha256_file(undo / "projection.sqlite")
+            undo_projection_hash = ""
+            if has_live_proj:
+                C._backup_projection(tid, undo / "projection.sqlite")
+                undo_projection_hash = _sha256_file(undo / "projection.sqlite")
             _write_json_sync(undo / "backup.meta.json", {"tid": tid, "created": ts, "files": 1, "tag": "before-restore", "sha256": checksum.hexdigest(), "projection_sha256": undo_projection_hash})
             marker = undo / "transaction.json"
             _write_json_sync(marker, {"status": "prepared", "operation": "restore"})
@@ -347,12 +365,15 @@ def sandbox_restore(bdir, phase=lambda _: None, allow_real=False):
                 shutil.copyfileobj(saved_file, src, length=1024 * 1024)
                 src.truncate(backup_path.stat().st_size)
                 _sync(src)
-                for table in C._PROJECTION_TABLES:
-                    con.execute(f'DELETE FROM main."{table}" WHERE thread_id=?', (tid,))
-                    con.execute(f'INSERT INTO main."{table}" SELECT * FROM saved."{table}" WHERE thread_id=?', (tid,))
-                con.commit()
+                if con is not None:
+                    for table in C._PROJECTION_TABLES:
+                        con.execute(f'DELETE FROM main."{table}" WHERE thread_id=?', (tid,))
+                        if use_proj_snap:
+                            con.execute(f'INSERT INTO main."{table}" SELECT * FROM saved."{table}" WHERE thread_id=?', (tid,))
+                    con.commit()
             except Exception as original:
-                con.rollback()
+                if con is not None and con.in_transaction:
+                    con.rollback()
                 if modified:
                     try:
                         src.seek(0)
@@ -371,6 +392,7 @@ def sandbox_restore(bdir, phase=lambda _: None, allow_real=False):
             C._FILE_CACHE.clear()
             return {"restored": str(bdir), "backup": str(undo), "warns": warns}
         finally:
-            if con.in_transaction:
-                con.rollback()
-            con.close()
+            if con is not None:
+                if con.in_transaction:
+                    con.rollback()
+                con.close()

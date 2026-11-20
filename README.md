@@ -89,15 +89,13 @@ The same conversation can be transferred to another environment to see how its m
 
 ## Требования / Requirements
 
-- **Python 3.14+** — используется встроенный модуль `compression.zstd` / uses the built-in `compression.zstd` module
-- Зависимости / Dependencies: `aiohttp`, `psutil` ([`requirements.txt`](requirements.txt))
+- **Python 3.10+** (рекомендуется 3.14+ со встроенным `compression.zstd`; для 3.10–3.13 автоматически ставится `zstandard` из `requirements.txt`) / **Python 3.10+** (3.14+ recommended with built-in `compression.zstd`; on 3.10–3.13 `zstandard` is installed via `requirements.txt`)
+- Зависимости / Dependencies: `aiohttp`, `psutil` (и `zstandard` на Python < 3.14) ([`requirements.txt`](requirements.txt))
 - Windows, macOS или Linux / Windows, macOS or Linux
 
 > **Ограничения на macOS и Linux / macOS and Linux limitations:**
-> - История Codex открывается только для просмотра — редактирование Codex работает только на Windows.
 > - Claude Code нельзя править, пока он запущен: на этих системах нельзя проверить, занят ли конкретный файл сессии, поэтому правка блокируется целиком, пока работает любой процесс Claude.
 >
-> - Codex history is read-only — editing Codex is Windows-only.
 > - Claude Code history can’t be edited while Claude is running: these systems can’t tell whether a specific session file is in use, so editing is blocked while any Claude process is running.
 
 ## Установка и запуск / Installation and Running
@@ -124,7 +122,12 @@ Once started, the server opens your browser at `http://127.0.0.1:8780`.
 
 ### macOS
 
-1. Установить Python 3.14+ / Install Python 3.14+:
+Быстрый способ: открыть `K1ttyTools.command` двойным кликом в Finder или выполнить `./K1ttyTools.command` в терминале — скрипт сам найдёт Python 3.10+, создаст `.venv`, поставит зависимости из `requirements.txt` и запустит сервер (также работает на Linux).  
+Quick start: double-click `K1ttyTools.command` in Finder or run `./K1ttyTools.command` in Terminal — it automatically picks Python 3.10+, creates `.venv`, installs dependencies from `requirements.txt`, and starts the server (also works on Linux).
+
+Либо вручную / Or manually:
+
+1. Установить Python 3.10+ (например 3.14) / Install Python 3.10+ (e.g. 3.14):
    ```bash
    brew install python@3.14
    ```
@@ -199,6 +202,7 @@ By default data is looked up in the user’s home directory. Override the paths 
 ```
 k1tty-tools/
 ├── server.py             # веб-сервер (aiohttp), точка входа / web server, entry point
+├── K1ttyTools.command    # быстрый запуск на macOS и Linux / macOS & Linux launcher
 ├── requirements.txt      # зависимости Python / Python dependencies
 ├── engines/              # чтение и запись истории каждой среды, конвертер, монитор процессов
 │                         # per-app history I/O, converter, process monitor
