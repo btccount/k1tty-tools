@@ -1,0 +1,44 @@
+[
+  {
+    "id": "safety",
+    "title": "Safety Guard",
+    "code": "misalignmentPolicyViolation",
+    "rollout_code": "misalignment_policy_violation",
+    "message": "This request was blocked by our safety systems. Reason: Potentially unintended activity."
+  },
+  {
+    "id": "cyber",
+    "title": "Cyber Policy",
+    "code": "cyberPolicy",
+    "rollout_code": "cyber_policy",
+    "message": "This content was flagged for possible cybersecurity risk. If this seems wrong, try rephrasing your request."
+  },
+  {
+    "id": "usage",
+    "title": "Usage Limit",
+    "code": "usageLimitExceeded",
+    "rollout_code": "usage_limit_exceeded",
+    "message": "You've hit your usage limit. Upgrade to Pro or try again later."
+  },
+  {
+    "id": "overload",
+    "title": "Overloaded",
+    "code": "serverOverloaded",
+    "rollout_code": "server_overloaded",
+    "message": "Selected model is at capacity. Please try a different model."
+  },
+  {
+    "id": "unauth",
+    "title": "Unauthorized",
+    "code": "unauthorized",
+    "rollout_code": "unauthorized",
+    "message": "Your access token could not be refreshed."
+  },
+  {
+    "id": "badreq",
+    "title": "Bad Request",
+    "code": "other",
+    "rollout_code": "other",
+    "message": "{\"detail\":\"Bad Request\"}"
+  }
+]

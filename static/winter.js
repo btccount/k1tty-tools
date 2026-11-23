@@ -2,7 +2,9 @@
 
 (function () {
   const STORAGE_KEY = "k1tty_winter";
-  const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches || false;
+  const reducedMedia = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+  const isReduced = () => window.K1ttyAppearance?.isReducedMotion?.() ?? !!reducedMedia?.matches;
+  let lastReduced = isReduced();
 
   let enabled = true;
   try {
@@ -19,7 +21,7 @@
   canvas.id = "winterCanvas";
   canvas.className = "winter-canvas";
   canvas.setAttribute("aria-hidden", "true");
-  const ctx = canvas.getContext("2d");
+  let ctx = null;
 
   function bakeSoftSprite(size, inner, mid) {
     const c = document.createElement("canvas");
@@ -78,10 +80,17 @@
     return c;
   }
 
-  const SPR_MICRO = bakeSoftSprite(12, "rgba(238, 247, 255, 0.95)", "rgba(202, 226, 255, 0.35)");
-  const SPR_SOFT = bakeSoftSprite(20, "rgba(244, 250, 255, 0.95)", "rgba(196, 224, 255, 0.42)");
-  const SPR_BOKEH = bakeSoftSprite(28, "rgba(240, 248, 255, 0.78)", "rgba(176, 214, 255, 0.28)");
-  const SPR_CRYSTAL = bakeCrystalSprite(36);
+  let SPR_MICRO, SPR_SOFT, SPR_BOKEH, SPR_CRYSTAL;
+  function ensureResources() {
+    if (ctx) return true;
+    ctx = canvas.getContext("2d");
+    if (!ctx) return false;
+    SPR_MICRO = bakeSoftSprite(12, "rgba(238, 247, 255, 0.95)", "rgba(202, 226, 255, 0.35)");
+    SPR_SOFT = bakeSoftSprite(20, "rgba(244, 250, 255, 0.95)", "rgba(196, 224, 255, 0.42)");
+    SPR_BOKEH = bakeSoftSprite(28, "rgba(240, 248, 255, 0.78)", "rgba(176, 214, 255, 0.28)");
+    SPR_CRYSTAL = bakeCrystalSprite(36);
+    return true;
+  }
 
   let w = 0;
   let h = 0;
@@ -89,6 +98,8 @@
   let flakes = [];
   let rafId = 0;
   let fadeTimer = 0;
+  let fadeRafId = 0;
+  let resizeRafId = 0;
   let prevTs = 0;
   let elapsed = 0;
   let pointerX = -9999;
@@ -163,9 +174,14 @@
   }
 
   function syncSize() {
-    w = Math.max(1, window.innerWidth);
-    h = Math.max(1, window.innerHeight);
-    dpr = Math.min(2, window.devicePixelRatio || 1);
+    if (!ensureResources()) return;
+    const nextW = Math.max(1, window.innerWidth);
+    const nextH = Math.max(1, window.innerHeight);
+    const nextDpr = Math.min(2, window.devicePixelRatio || 1);
+    if (w === nextW && h === nextH && dpr === nextDpr && canvas.width > 1) return;
+    w = nextW;
+    h = nextH;
+    dpr = nextDpr;
     canvas.width = Math.round(w * dpr);
     canvas.height = Math.round(h * dpr);
     canvas.style.width = w + "px";
@@ -183,13 +199,14 @@
   }
 
   function renderFrame(dt) {
+    const animate = !isReduced();
     ctx.clearRect(0, 0, w, h);
     const wind = Math.sin(elapsed * 0.24) * 13 + Math.cos(elapsed * 0.09) * 7;
     pointerVx *= Math.pow(0.08, dt);
 
     for (let i = 0; i < flakes.length; i++) {
       const f = flakes[i];
-      if (!reduced) {
+      if (animate) {
         const sway = Math.sin(elapsed * f.freq + f.phase) * f.amp;
         const layerWind = wind * (0.45 + f.layer * 0.35);
 
@@ -240,22 +257,16 @@
 
   function tick(ts) {
     rafId = 0;
-    if (!enabled || document.hidden) return;
+    if (!enabled || document.hidden || isReduced() || !ctx) return;
     const dt = prevTs ? Math.min(0.05, Math.max(0.001, (ts - prevTs) / 1000)) : 0.016;
     prevTs = ts;
     elapsed += dt;
     renderFrame(dt);
-    if (!reduced) {
-      rafId = requestAnimationFrame(tick);
-    }
+    rafId = requestAnimationFrame(tick);
   }
 
   function startLoop() {
-    if (!enabled || document.hidden) return;
-    if (reduced) {
-      renderFrame(0);
-      return;
-    }
+    if (!enabled || document.hidden || isReduced() || !ctx) return;
     if (rafId) return;
     prevTs = 0;
     rafId = requestAnimationFrame(tick);
@@ -266,9 +277,12 @@
       cancelAnimationFrame(rafId);
       rafId = 0;
     }
+    if (resizeRafId) { cancelAnimationFrame(resizeRafId); resizeRafId = 0; }
+    prevTs = 0;
   }
 
   function applyState(next, persist) {
+    if (persist && !!next === enabled) return;
     enabled = !!next;
     if (persist) {
       try {
@@ -279,28 +293,34 @@
       clearTimeout(fadeTimer);
       fadeTimer = 0;
     }
+    if (fadeRafId) { cancelAnimationFrame(fadeRafId); fadeRafId = 0; }
     document.body.classList.toggle("winter-theme", enabled);
-    if (enabled) {
+    if (enabled && !isReduced() && !document.hidden) {
       syncSize();
       canvas.classList.remove("hidden");
-      requestAnimationFrame(() => canvas.classList.add("visible"));
+      fadeRafId = requestAnimationFrame(() => {
+        fadeRafId = 0;
+        if (enabled && !document.hidden && !isReduced()) canvas.classList.add("visible");
+      });
       startLoop();
     } else {
+      stopLoop();
       canvas.classList.remove("visible");
+      if (!ctx) { canvas.classList.add("hidden"); return; }
       fadeTimer = setTimeout(() => {
         fadeTimer = 0;
-        if (!enabled) {
-          stopLoop();
-          ctx.clearRect(0, 0, w, h);
+        if (!enabled || isReduced() || document.hidden) {
           canvas.classList.add("hidden");
+           
+          canvas.width = canvas.height = 1;
         }
-      }, 380);
+      }, 180);
     }
     window.K1ttyCat?.refresh?.();
   }
 
   window.addEventListener("pointermove", (ev) => {
-    if (!enabled) return;
+    if (!enabled || document.hidden || isReduced()) return;
     if (lastPtrX > -1000) {
       pointerVx = Math.max(-180, Math.min(180, (ev.clientX - lastPtrX) * 6));
     }
@@ -316,15 +336,39 @@
   }, { passive: true });
 
   window.addEventListener("resize", () => {
-    if (!enabled) return;
-    syncSize();
-    if (reduced) renderFrame(0);
+    if (!enabled || document.hidden || isReduced() || resizeRafId) return;
+    resizeRafId = requestAnimationFrame(() => {
+      resizeRafId = 0;
+      if (enabled && !document.hidden && !isReduced()) syncSize();
+    });
   }, { passive: true });
 
   document.addEventListener("visibilitychange", () => {
-    if (document.hidden) stopLoop();
-    else if (enabled) startLoop();
+    if (document.hidden) {
+      stopLoop();
+      if (fadeRafId) { cancelAnimationFrame(fadeRafId); fadeRafId = 0; }
+    } else if (enabled && !isReduced()) {
+      syncSize();
+      canvas.classList.remove("hidden");
+      if (!isReduced()) canvas.classList.add("visible");
+      startLoop();
+    }
   });
+
+  function syncMotion() {
+    const reduced = isReduced();
+    if (lastReduced === reduced) return;
+    lastReduced = reduced;
+    if (reduced) {
+      stopLoop();
+      if (fadeRafId) { cancelAnimationFrame(fadeRafId); fadeRafId = 0; }
+      canvas.classList.remove("visible");
+    } else if (enabled && !document.hidden) {
+      applyState(enabled, false);
+    }
+  }
+  window.addEventListener("k1tty:appearancechange", syncMotion);
+  reducedMedia?.addEventListener?.("change", syncMotion);
 
   function mount() {
     document.body.appendChild(glow);

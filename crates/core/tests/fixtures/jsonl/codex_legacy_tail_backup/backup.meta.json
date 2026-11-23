@@ -1,0 +1,12 @@
+{
+ "tid": "cx-oracle",
+ "created": "20261120-042333-054987",
+ "files": 1,
+ "tag": "k1tty_unlock",
+ "tail_backup": {
+  "rel": "2026/01/01/rollout-oracle.jsonl",
+  "offset": 3403,
+  "orig_size": 3787,
+  "tail_len": 384
+ }
+}

@@ -1,0 +1,60 @@
+{
+  "meta": {
+    "source_provider": "fixture",
+    "source_id": "original",
+    "title": "Проверка 🐱",
+    "directory": ""
+  },
+  "entries": [
+    {
+      "kind": "user",
+      "text": "Задача: сохранить контекст",
+      "ts": "2026-11-19T10:00:00Z"
+    },
+    {
+      "kind": "tool",
+      "subtype": "thinking",
+      "text": "План анализа",
+      "ts": "2026-11-19T10:00:01Z"
+    },
+    {
+      "kind": "assistant",
+      "text": "Начинаю работу",
+      "ts": "2026-11-19T10:00:02Z"
+    },
+    {
+      "kind": "tool",
+      "subtype": "tool_output",
+      "tool": "write_file",
+      "text": "Файл создан 🐱",
+      "status": "ok",
+      "ts": "2026-11-19T10:00:03Z"
+    },
+    {
+      "kind": "system",
+      "subtype": "instructions",
+      "text": "Использовать UTF-8",
+      "ts": "2026-11-19T10:00:04Z"
+    },
+    {
+      "kind": "compact",
+      "text": "Прежние решения сохранены",
+      "ts": "2026-11-19T10:00:05Z"
+    },
+    {
+      "kind": "error",
+      "text": "Синтетическая ошибка",
+      "ts": "2026-11-19T10:00:06Z"
+    },
+    {
+      "kind": "user",
+      "text": "Продолжай",
+      "ts": "2026-11-19T10:00:07Z"
+    },
+    {
+      "kind": "assistant",
+      "text": "Готово",
+      "ts": "2026-11-19T10:00:08Z"
+    }
+  ]
+}

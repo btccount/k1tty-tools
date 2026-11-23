@@ -1,10 +1,10 @@
 # K1tty Tools
 
-Python-скрипт с веб-интерфейсом для просмотра, редактирования, очистки и переноса истории диалогов в Google Antigravity, OpenAI Codex, Claude Code и OpenCode.
+Нативное десктопное приложение на Rust + Tauri для просмотра, редактирования, очистки, оптимизации контекста и переноса истории диалогов в Google Antigravity, Antigravity CLI, OpenAI Codex, Claude Code и OpenCode.
 
-A Python script with a web interface for viewing, editing, cleaning, and transferring conversation history between Google Antigravity, OpenAI Codex, Claude Code, and OpenCode.
+A native desktop application built with Rust + Tauri for viewing, editing, cleaning, optimizing context, and transferring conversation history across Google Antigravity, Antigravity CLI, OpenAI Codex, Claude Code, and OpenCode.
 
-![Обзор: все среды и диалоги на диске / Overview: all apps and dialogues on disk](docs/screenshots/overview.png)
+![Обзор: все среды, диалоги и бэкапы (тема Graphite) / Overview: all environments, dialogues, and backups (Graphite theme)](docs/screenshots/overview.png)
 
 ## Возможности / Features
 
@@ -14,50 +14,70 @@ A Python script with a web interface for viewing, editing, cleaning, and transfe
 
 When Codex blocks a chat due to safety filters, the tool shows the reason and unlocks it in one click. You can also manually lock a thread with any custom reason for testing purposes.
 
-### Редактирование сообщений и системных промптов / Editing Messages and System Prompts
+### Редактирование сообщений, промптов и инструментов / Editing Messages, Prompts, and Tool Calls
 
-Можно менять системный промпт, внутренние инструкции и метаданные чата. Править текст сообщений пользователя и ответы модели. Править вызовы инструментов и ошибки, не ломая структуру файла.
+Можно менять системный промпт, внутренние инструкции и метаданные чата. Править текст сообщений пользователя и ответы модели. Править вызовы инструментов (`tool_calls`), их выводы, размышления (`thinking`) и ошибки во всех средах, не ломая структуру файлов.
 
-You can edit the system prompt, internal instructions, and chat metadata. Modify user messages and model responses. Edit tool calls and errors without breaking the file structure.
+You can edit the system prompt, internal instructions, and chat metadata. Modify user messages and model responses. Edit tool calls (`tool_calls`), tool outputs, thinking blocks, and errors across all environments without breaking the file structure.
 
 <p>
-  <img src="docs/screenshots/chat.png" width="49%" alt="Просмотр диалога / Dialogue view">
+  <img src="docs/screenshots/chat.png" width="49%" alt="Просмотр диалога: таблицы, формулы LaTeX, diff и файловые ссылки / Dialogue view: tables, LaTeX formulas, diff, and file links">
   <img src="docs/screenshots/edit.png" width="49%" alt="Редактирование ответа модели / Editing a model reply">
 </p>
 
-### Удаление и обрезка истории / Deleting and Trimming History
+### Оптимизация контекста и счётчик токенов / Context Optimizer & Token Counter
 
-Удаление отдельных сообщений без сбоя нумерации шагов. Обрезка начала диалога до выбранного места или удаление всей переписки после нужного шага. Полное удаление ненужных диалогов из папок приложений.
+Показывает оценку контекста в токенах прямо в шапке диалога и позволяет в один клик облегчить тяжёлый чат: удалить блоки `thinking` / `reasoning` и сократить громоздкие выводы инструментов (с выбором порога 2 / 4 / 10 / 25 КБ), сохраняя целостность связей и нумерации. Перед очисткой показывается прогноз экономии и список самых тяжёлых шагов. Обе функции можно отключить в настройках.
 
-Delete individual messages without breaking step numbering. Trim the beginning of a conversation up to a selected point, or remove everything after a specific step. Completely delete unwanted conversations from the application folders.
+Shows an estimated token count in the thread header and lets you slim down bloated chats in one click: strip `thinking` / `reasoning` blocks and trim oversized tool outputs (with configurable 2 / 4 / 10 / 25 KB thresholds) while keeping DAG links and step numbering intact. Displays a savings preview and the heaviest steps before applying. Both controls are optional in Settings.
 
-### Конвертация между средами / Conversion Between Environments
+![Оптимизация контекста / Context optimizer](docs/screenshots/slim.png)
 
-Перенос диалогов между любыми из четырёх сред:
+### Удаление, обрезка, поиск и пакетные действия / Trimming, Full-Text Search, and Batch Actions
 
-- Antigravity в Codex, Claude, OpenCode
-- Codex в Antigravity, Claude, OpenCode
-- Claude в Antigravity, Codex, OpenCode
-- OpenCode в Antigravity, Codex, Claude
+Удаление отдельных сообщений без сбоя нумерации шагов. Обрезка начала диалога до выбранного места или удаление всей переписки после нужного шага. Полнотекстовый поиск внутри чата (`Ctrl+F`) и по содержимому всех чатов (`Ctrl+Shift+F`), палитра команд (`Ctrl+K`), закрепление диалогов и мультивыбор в сайдбаре для пакетного экспорта или удаления.
 
-Скрипт переводит формат сообщений, роли и вызовы инструментов под требования целевого приложения.
+Delete individual messages without breaking step numbering. Trim the beginning of a conversation up to a selected point, or remove everything after a specific step. Full-text search inside a chat (`Ctrl+F`) and across all chats (`Ctrl+Shift+F`), command palette (`Ctrl+K`), pinned chats, and sidebar multi-select for batch export or deletion.
 
-Transfer conversations between any of the four environments:
+### Конвертация между средами и архивы `.k1tty` / Cross-Environment Conversion & `.k1tty` Archives
 
-- Antigravity → Codex, Claude, OpenCode
-- Codex → Antigravity, Claude, OpenCode
-- Claude → Antigravity, Codex, OpenCode
-- OpenCode → Antigravity, Codex, Claude
+Перенос диалогов между любыми из пяти сред:
 
-The script converts message formats, roles, and tool calls to match the requirements of the target application.
+- Antigravity <-> Antigravity CLI, Codex, Claude, OpenCode
+- Codex <-> Antigravity, Antigravity CLI, Claude, OpenCode
+- Claude <-> Antigravity, Antigravity CLI, Codex, OpenCode
+- OpenCode <-> Antigravity, Antigravity CLI, Codex, Claude
 
-![Конвертация чата в другую среду / Converting a chat to another app](docs/screenshots/convert.png)
+Поддерживаются сжатые переносимые архивы `.k1tty` (zstd / lzma2), сохранение границ компактизации (`compact_boundary`) в Claude и автоматическое определение активного аккаунта Claude Desktop.
+
+Transfer conversations between any of the five environments with built-in `.k1tty` archive export/import (zstd / lzma2), preserved Claude compaction boundaries (`compact_boundary`), and active Claude Desktop account detection.
+
+![Конвертация чата в другую среду / Converting a chat to another environment](docs/screenshots/convert.png)
+
+### Рендер разметки, формул и локальных путей / Rich Markdown, LaTeX Math, and Local Paths
+
+Сообщения, размышления и выводы инструментов поддерживают таблицы GFM, списки с чекбоксами, callout-блоки, подсветку `diff`, локальный офлайн-рендер математических формул (LaTeX через встроенный KaTeX) и кликабельные ссылки на локальные файлы с открытием в Проводнике / Finder. Работает выделение текста во всех блоках, `Ctrl+A`, контекстное меню копирования (исходный TeX формул, код, ячейки и таблицы в Markdown).
+
+Messages, thinking blocks, and tool outputs render GFM tables, task lists, callouts, `diff` highlighting, offline LaTeX math (bundled KaTeX), and clickable local file links that reveal files directly in Explorer / Finder. Full text selection across all blocks, scoped `Ctrl+A`, and a right-click copy menu (raw TeX source, code blocks, table cells/Markdown).
+
+### Темы и оформление / Themes & Appearance
+
+12 встроенных тем (4 базовые, 4 с пиксельными котиками и 4 с пиксельными манулами), авто-адаптивный тон интерфейса от одного выбранного цвета и мягкое градиентное свечение.
+
+12 built-in themes (4 classic, 4 pixel cat themes, and 4 pixel manul themes), auto-adaptive interface tint derived from a single chosen color, and subtle ambient gradient lighting.
+
+<p>
+  <img src="docs/screenshots/theme-cat.png" width="49%" alt="Тема с котиком (Matcha Cat) / Pixel Cat theme (Matcha Cat)">
+  <img src="docs/screenshots/theme-manul.png" width="49%" alt="Тема с манулом (Steppe Manul) / Pixel Manul theme (Steppe Manul)">
+</p>
+
+![Настройки оформления и выбор тем / Appearance settings and theme picker](docs/screenshots/settings.png)
 
 ### Бэкапы / Backups
 
-Автобэкапы отключаются тумблером. Показывает вес диалогов и бэкапов по каждому приложению. Любую сохранённую копию можно открыть и восстановить.
+Автобэкапы отключаются тумблером. Показывает вес диалогов и бэкапов по каждому приложению. Любую сохранённую копию можно открыть в режиме просмотра (только чтение), восстановить или удалить.
 
-Automatic backups can be toggled off. Shows the size of conversations and backups for each application. Any saved copy can be opened and restored.
+Automatic backups can be toggled off. Shows the size of conversations and backups for each application. Any saved backup can be inspected in read-only mode, restored, or deleted.
 
 ![Бэкапы диалога / Dialogue backups](docs/screenshots/backups.png)
 
@@ -67,13 +87,13 @@ Automatic backups can be toggled off. Shows the size of conversations and backup
 
 You can edit a previous assistant response in the history so that the model treats it as its own previous output in the next step. This demonstrates how much the model trusts its past responses and how far it can deviate from the original reasoning path when a previous step is spoofed. Useful for evaluating robustness against prompt injection via conversation history.
 
-**Восстановление чата после срабатывания Safety Guard / Recovering a Chat After Safety Guard Trigger.** Когда чат получил Safe Guard и модель отказывается продолжать работу, причину можно найти по истории. Дальше два пути. Первый — отредактировать сообщение, которое триггернуло фильтр, или подменить ответ модели на нейтральный, чтобы следующий шаг опирался на него как на собственный вывод. Второй — откатиться до сообщения перед срабатыванием, удалив всё после него, и продолжить с чистой точки. Оба варианта возвращают чат в рабочее состояние, а исходную ветку можно сохранить в бэкапе и восстановить позже.
+**Восстановление чата после срабатывания Safety Guard / Recovering a Chat After Safety Guard Trigger.** Когда чат получил Safe Guard и модель отказывается продолжать работу, причину можно найти по истории. Дальше два пути. Первый - отредактировать сообщение, которое триггернуло фильтр, или подменить ответ модели на нейтральный, чтобы следующий шаг опирался на него как на собственный вывод. Второй - откатиться до сообщения перед срабатыванием, удалив всё после него, и продолжить с чистой точки. Оба варианта возвращают чат в рабочее состояние, а исходную ветку можно сохранить в бэкапе и восстановить позже.
 
-When a chat hits a Safety Guard and the model refuses to continue, you can find the cause in the history. There are two approaches. First — edit the message that triggered the filter, or replace the model’s response with a neutral one so the next step treats it as its own previous output. Second — roll back to the message before the trigger by deleting everything after it, and continue from a clean point. Both methods restore the chat to a working state, while the original branch can be saved in a backup and restored later.
+When a chat hits a Safety Guard and the model refuses to continue, you can find the cause in the history. There are two approaches. First: edit the message that triggered the filter, or replace the model's response with a neutral one so the next step treats it as its own previous output. Second: roll back to the message before the trigger by deleting everything after it, and continue from a clean point. Both methods restore the chat to a working state, while the original branch can be saved in a backup and restored later.
 
 **Подмена системного промпта / Spoofing the System Prompt.** Смена системного промпта в существующем чате позволяет сравнить поведение модели на одном и том же наборе сообщений при разных инструкциях. Этот сценарий особенно удобен для внедрения джейлбрейка. Системный промпт задаёт рамку, в которой модель интерпретирует всю переписку, поэтому его правка меняет поведение сразу во всех следующих шагах, без необходимости редактировать отдельные сообщения. Можно подставить роль, стиль ответа или набор разрешений, которые через интерфейс не выставить, и посмотреть, как модель реагирует на тот же диалог в новой рамке. Полезно и для сравнения, как формулировка системного промпта влияет на отказы, стиль и выбор инструментов.
 
-Changing the system prompt in an existing chat lets you compare the model’s behavior on the same set of messages under different instructions. This scenario is especially useful for injecting a jailbreak. The system prompt defines the frame in which the model interprets the entire conversation, so editing it immediately changes behavior in all subsequent steps without needing to modify individual messages. You can inject a role, response style, or set of permissions that cannot be set through the UI, and observe how the model reacts to the same dialogue under the new frame. Also useful for comparing how system prompt wording affects refusals, style, and tool selection.
+Changing the system prompt in an existing chat lets you compare the model's behavior on the same set of messages under different instructions. This scenario is especially useful for injecting a jailbreak. The system prompt defines the frame in which the model interprets the entire conversation, so editing it immediately changes behavior in all subsequent steps without needing to modify individual messages. You can inject a role, response style, or set of permissions that cannot be set through the UI, and observe how the model reacts to the same dialogue under the new frame. Also useful for comparing how system prompt wording affects refusals, style, and tool selection.
 
 **Подмена контекста (context spoofing) / Context Spoofing.** Редактирование метаданных, ролей и tool calls даёт возможность собрать состояние чата, которое через интерфейс не создать. Это позволяет тестировать, как модель реагирует на нестандартные или противоречивые состояния контекста.
 
@@ -87,97 +107,83 @@ In a local environment you can reproducibly test which prompt formulations and c
 
 The same conversation can be transferred to another environment to see how its model behaves on an identical context. This enables direct model comparison on the same inputs.
 
-## Требования / Requirements
+## Установка / Installation
 
-- **Python 3.10+** (рекомендуется 3.14+ со встроенным `compression.zstd`; для 3.10–3.13 автоматически ставится `zstandard` из `requirements.txt`) / **Python 3.10+** (3.14+ recommended with built-in `compression.zstd`; on 3.10–3.13 `zstandard` is installed via `requirements.txt`)
-- Зависимости / Dependencies: `aiohttp`, `psutil` (и `zstandard` на Python < 3.14) ([`requirements.txt`](requirements.txt))
-- Windows, macOS или Linux / Windows, macOS or Linux
+Готовые установщики для всех ОС собираются автоматически в [GitHub Releases](https://github.com/quesada-lab/k1tty-tools/releases) (Python больше не нужен).
 
-> **Ограничения на macOS и Linux / macOS and Linux limitations:**
-> - Claude Code нельзя править, пока он запущен: на этих системах нельзя проверить, занят ли конкретный файл сессии, поэтому правка блокируется целиком, пока работает любой процесс Claude.
->
-> - Claude Code history can’t be edited while Claude is running: these systems can’t tell whether a specific session file is in use, so editing is blocked while any Claude process is running.
-
-## Установка и запуск / Installation and Running
-
-После запуска сервер сам откроет браузер на `http://127.0.0.1:8780`.  
-Once started, the server opens your browser at `http://127.0.0.1:8780`.
+Pre-built installers for all platforms are published automatically in [GitHub Releases](https://github.com/quesada-lab/k1tty-tools/releases) (Python is no longer required).
 
 ### Windows
 
-1. Установить Python 3.14+ с [python.org](https://www.python.org/downloads/) (отметить «Add python.exe to PATH») или через winget:  
-   Install Python 3.14+ from [python.org](https://www.python.org/downloads/) (check “Add python.exe to PATH”) or via winget:
-   ```powershell
-   winget install Python.Python.3.14
-   ```
-2. Склонировать репозиторий и запустить / Clone and run:
-   ```powershell
-   git clone https://github.com/quesada-lab/k1tty-tools.git
-   cd k1tty-tools
-   py -3.14 -m venv .venv
-   .venv\Scripts\activate
-   pip install -r requirements.txt
-   python -X utf8 server.py
-   ```
+1. Скачайте `K1tty Tools_2.0.0_x64-setup.exe` (или `.msi`) со страницы [Releases](https://github.com/quesada-lab/k1tty-tools/releases).
+2. Запустите установщик. Если появится окно Windows SmartScreen (сборка без платной цифровой подписи), нажмите **«Подробнее» -> «Выполнить в любом случае»**.
 
-### macOS
+1. Download `K1tty Tools_2.0.0_x64-setup.exe` (or `.msi`) from [Releases](https://github.com/quesada-lab/k1tty-tools/releases).
+2. Run the installer. If Windows SmartScreen appears (unsigned open-source build), click **More info -> Run anyway**.
 
-Быстрый способ: открыть `K1ttyTools.command` двойным кликом в Finder или выполнить `./K1ttyTools.command` в терминале — скрипт сам найдёт Python 3.10+, создаст `.venv`, поставит зависимости из `requirements.txt` и запустит сервер (также работает на Linux).  
-Quick start: double-click `K1ttyTools.command` in Finder or run `./K1ttyTools.command` in Terminal — it automatically picks Python 3.10+, creates `.venv`, installs dependencies from `requirements.txt`, and starts the server (also works on Linux).
+### macOS (Apple Silicon & Intel)
 
-Либо вручную / Or manually:
-
-1. Установить Python 3.10+ (например 3.14) / Install Python 3.10+ (e.g. 3.14):
+1. Скачайте универсальный образ `K1tty Tools_2.0.0_universal.dmg` со страницы [Releases](https://github.com/quesada-lab/k1tty-tools/releases) и перетащите приложение в `Applications`.
+2. Так как сборка не нотаризована в Apple, при первом запуске снимите флаг карантина:
    ```bash
-   brew install python@3.14
+   xattr -cr "/Applications/K1tty Tools.app"
    ```
-2. Склонировать репозиторий и запустить / Clone and run:
+
+1. Download the universal `K1tty Tools_2.0.0_universal.dmg` from [Releases](https://github.com/quesada-lab/k1tty-tools/releases) and drag the app into `Applications`.
+2. Since the build is not notarized with Apple, clear the quarantine attribute before the first launch:
    ```bash
-   git clone https://github.com/quesada-lab/k1tty-tools.git
-   cd k1tty-tools
-   python3.14 -m venv .venv
-   source .venv/bin/activate
-   pip install -r requirements.txt
-   python -X utf8 server.py
+   xattr -cr "/Applications/K1tty Tools.app"
    ```
 
 ### Linux
 
-1. Установить Python 3.14+ из пакетов дистрибутива, а если его там ещё нет — через [uv](https://docs.astral.sh/uv/) или [pyenv](https://github.com/pyenv/pyenv).  
-   Install Python 3.14+ from your distro packages, or via [uv](https://docs.astral.sh/uv/) / [pyenv](https://github.com/pyenv/pyenv) if your distro doesn’t ship it yet.
-2. Склонировать репозиторий и запустить / Clone and run:
-   ```bash
-   git clone https://github.com/quesada-lab/k1tty-tools.git
-   cd k1tty-tools
-   python3.14 -m venv .venv
-   source .venv/bin/activate
-   pip install -r requirements.txt
-   python -X utf8 server.py
-   ```
+Скачайте `.AppImage` или `.deb` со страницы [Releases](https://github.com/quesada-lab/k1tty-tools/releases):
 
-### Через uv (любая ОС) / With uv (any OS)
-
-[uv](https://docs.astral.sh/uv/) сам скачает нужный Python и зависимости:  
-[uv](https://docs.astral.sh/uv/) downloads the right Python and dependencies by itself:
+Download `.AppImage` or `.deb` from [Releases](https://github.com/quesada-lab/k1tty-tools/releases):
 
 ```bash
-uv run --python 3.14 --with-requirements requirements.txt python -X utf8 server.py
+chmod +x K1tty\ Tools_*.AppImage
+./K1tty\ Tools_*.AppImage
 ```
 
-### Параметры запуска / Launch Options
+или для Debian / Ubuntu / or for Debian / Ubuntu:
 
-| Параметр / Option | Описание / Description |
-|---|---|
-| `python -X utf8 server.py 9000` | другой порт (по умолчанию 8780) / custom port (default 8780) |
-| `--no-open` или / or `NO_BROWSER=1` | не открывать браузер / don’t open the browser |
+```bash
+sudo apt install ./K1tty\ Tools_*.deb
+```
+
+> **Ограничения на macOS и Linux / macOS and Linux limitations:**
+> - Claude Code нельзя править, пока он запущен: на этих системах нельзя проверить, занят ли конкретный файл сессии, поэтому правка блокируется целиком, пока работает любой процесс Claude.
+> - Claude Code history cannot be edited while Claude is running: these systems cannot tell whether a specific session file is in use, so editing is blocked while any Claude process is running.
+
+## Сборка из исходников / Building From Source
+
+Требования / Requirements: **Rust (stable)**, **Node.js 22+**, и системные зависимости Tauri v2 (на Linux: `libwebkit2gtk-4.1-dev libgtk-3-dev libxdo-dev librsvg2-dev patchelf`).
+
+```bash
+git clone https://github.com/quesada-lab/k1tty-tools.git
+cd k1tty-tools
+npm ci
+npm run build
+```
+
+Для запуска в режиме разработки / To run in development mode:
+
+```bash
+npm run dev
+```
+
+На Windows также можно запустить [build.bat](build.bat).  
+On Windows you can also run [build.bat](build.bat).
 
 ### Нестандартные пути к данным / Custom Data Paths
 
 По умолчанию данные ищутся в домашней папке пользователя. Пути можно переопределить переменными окружения:  
-By default data is looked up in the user’s home directory. Override the paths with environment variables:
+By default data is looked up in the user's home directory. Override the paths with environment variables:
 
 | Переменная / Variable | По умолчанию / Default |
 |---|---|
+| `K1TTY_DATA_DIR` | системная папка данных приложения / OS app data directory |
 | `ANTIGRAVITY_APPDATA` | `~/.gemini/antigravity` |
 | `ANTIGRAVITY_CLI_APPDATA` | `~/.gemini/antigravity-cli` |
 | `CLAUDE_HOME` | `~/.claude` |
@@ -188,38 +194,30 @@ By default data is looked up in the user’s home directory. Override the paths 
 
 | Среда / App | Папка / Folder | Переменная / Variable |
 |---|---|---|
-| Antigravity | `backups/antigravity/` | `ANTIGRAVITY_BACKUP_ROOT` |
-| Antigravity CLI | `backups/antigravity_cli/` | `ANTIGRAVITY_CLI_BACKUP_ROOT` |
-| OpenCode | `backups/opencode/` | `OPENCODE_BACKUP_ROOT` |
-| Claude Code | `~/claude_backups/` (рядом с / next to `CLAUDE_HOME`) | — |
-| Codex | `~/codex_backups/` (рядом с / next to `CODEX_HOME`) | — |
+| Antigravity | `<K1TTY_DATA_DIR>/backups/antigravity/` | `ANTIGRAVITY_BACKUP_ROOT` |
+| Antigravity CLI | `<K1TTY_DATA_DIR>/backups/antigravity_cli/` | `ANTIGRAVITY_CLI_BACKUP_ROOT` |
+| OpenCode | `<K1TTY_DATA_DIR>/backups/opencode/` | `OPENCODE_BACKUP_ROOT` |
+| Claude Code | `~/claude_backups/` (рядом с / next to `CLAUDE_HOME`) | - |
+| Codex | `~/codex_backups/` (рядом с / next to `CODEX_HOME`) | - |
 
-Пути `backups/...` указаны относительно папки проекта. Список бэкапов, их размер и восстановление доступны в интерфейсе.  
-`backups/...` paths are relative to the project folder. The UI lists backups, shows their size and restores them.
+Список бэкапов, их размер, просмотр и восстановление доступны прямо в интерфейсе.  
+The UI lists backups, shows their size, and lets you inspect or restore them directly.
 
 ## Структура проекта / Project Structure
 
 ```
 k1tty-tools/
-├── server.py             # веб-сервер (aiohttp), точка входа / web server, entry point
-├── K1ttyTools.command    # быстрый запуск на macOS и Linux / macOS & Linux launcher
-├── requirements.txt      # зависимости Python / Python dependencies
-├── engines/              # чтение и запись истории каждой среды, конвертер, монитор процессов
-│                         # per-app history I/O, converter, process monitor
-├── providers/            # адаптеры сред для сервера / app adapters used by the server
-├── docs/screenshots/     # скриншоты для README / README screenshots
-└── static/               # веб-интерфейс (HTML/JS/CSS) / web UI
-    └── icons/
+├── crates/core/          # ядро на Rust: провайдеры, конвертер, оптимизация контекста, монитор процессов
+│                         # Rust core: providers, converter, context optimizer, process monitor
+├── src-tauri/            # нативная оболочка Tauri v2, команды IPC и конфигурация сборки
+│                         # Tauri v2 native shell, IPC commands, and bundle config
+├── static/               # фронтенд интерфейса (HTML/JS/CSS, темы, встроенные шрифты и KaTeX)
+│                         # desktop UI frontend (HTML/JS/CSS, themes, bundled fonts, and KaTeX)
+├── scripts/              # сборка UI в dist/ и автотесты интерфейса / UI build & automated tests
+├── docs/screenshots/     # демо-скриншоты для README / demo README screenshots
+└── .github/workflows/    # кроссплатформенная сборка и релизы (Windows, macOS, Linux)
+                          # cross-platform CI builds and releases (Windows, macOS, Linux)
 ```
-
-Бэкапы (`backups/`) и настройки (`k1tty_settings.json`) создаются локально и в репозиторий не попадают.  
-Backups (`backups/`) and settings (`k1tty_settings.json`) are created locally and are excluded from the repository.
-
-## Обновление со старой версии / Upgrading From an Older Version
-
-Раньше код лежал в папке `k1tty_editor/`. После `git pull` и первого запуска `server.py` бэкапы и настройки из `k1tty_editor/` автоматически переносятся в корень проекта; существующие файлы не перезаписываются. Запускать теперь нужно `server.py` вместо `K1ttyTools.bat`.
-
-The code used to live in `k1tty_editor/`. After `git pull`, the first run of `server.py` moves backups and settings from `k1tty_editor/` to the project root without overwriting existing files. Run `server.py` instead of `K1ttyTools.bat` from now on.
 
 ## Лицензия / License
 

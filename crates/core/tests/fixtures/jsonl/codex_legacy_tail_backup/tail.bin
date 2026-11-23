@@ -1,0 +1,2 @@
+{"ordinal": 16, "timestamp": "2026-01-01T12:00:00Z", "type": "event_msg", "payload": {"type": "task_complete", "turn_id": "turn2", "error": {"codex_error_info": "usage_limit_exceeded", "message": "You've hit your usage limit."}}}
+{"ordinal": 17, "timestamp": "2026-01-01T12:00:00Z", "type": "response_item", "payload": {"type": "unknown_future_type", "payload": {"preserve": "yes"}}}

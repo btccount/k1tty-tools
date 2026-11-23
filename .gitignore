@@ -1,4 +1,3 @@
-# Python
 __pycache__/
 *.py[cod]
 *$py.class
@@ -6,23 +5,37 @@ __pycache__/
 venv/
 env/
 
-# SQLite temp files
 *.sqlite3-journal
 *.sqlite-wal
 *.sqlite-shm
 
-# Local app data (backups, user settings)
 backups/
 k1tty_settings.json
 
-# Leftovers from older layouts (data is migrated automatically on start)
 k1tty_editor/
 claude_history_editor/
 codex_history_editor/
 
-# IDE / OS
 .idea/
 .vscode/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+target/
+node_modules/
+dist/
+src-tauri/gen/
+*.log
+
+.k1tty-backup-*/
+.k1tty-ui-backup-*/
+update/
+APPLY_UPDATE.bat
+README_UPDATE.txt
+*.7z
+docs/migration-validation.json
+scripts/apply-ui-polish.mjs
+scripts/ui-polish.css
+scripts/ui-polish.patch.json
+scripts/UI_UPDATE.md

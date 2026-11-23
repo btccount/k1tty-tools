@@ -1,0 +1,30 @@
+[package]
+name = "k1tty-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+rusqlite = { version = "0.37", features = ["bundled", "backup"] }
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "v7"] }
+sha2 = "0.10"
+sha1 = "0.10"
+hex = "0.4"
+regex = "1"
+walkdir = "2"
+tempfile = "3"
+dirs = "6"
+sysinfo = "0.37"
+zstd = "0.13"
+xz2 = { version = "0.1", features = ["static"] }
+flate2 = "1"
+base64 = "0.22"
+plist = "1"
+
+[target.'cfg(unix)'.dependencies]
+fs2 = "0.4"

@@ -1,0 +1,27 @@
+{
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "K1tty Tools",
+        "width": 1280,
+        "height": 840,
+        "minWidth": 760,
+        "minHeight": 540,
+        "center": true,
+        "resizable": true,
+        "decorations": false,
+        "dragDropEnabled": false,
+        "devtools": false,
+        "zoomHotkeysEnabled": false,
+        "allowLinkPreview": false,
+        "backgroundColor": "#00000000",
+        "shadow": false,
+        "maximizable": true,
+        "minimizable": true,
+        "closable": true,
+        "transparent": true
+      }
+    ]
+  }
+}

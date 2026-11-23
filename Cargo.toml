@@ -1,0 +1,15 @@
+[workspace]
+members = ["crates/core", "src-tauri"]
+default-members = ["crates/core"]
+resolver = "2"
+
+[workspace.package]
+version = "2.0.0"
+edition = "2021"
+license = "MIT"
+rust-version = "1.90"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

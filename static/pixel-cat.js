@@ -254,10 +254,6 @@
 
   const SPRITES = {};
   const WINTER_SPRITES = {};
-  for (const [k, rows] of Object.entries(RAW)) {
-    SPRITES[k] = bakeSprite(rows);
-    WINTER_SPRITES[k] = bakeSprite(applyWinterScarf(k, rows));
-  }
 
   const SIZE = 32;
   const STOP_DIST = 54;
@@ -271,8 +267,7 @@
   canvas.width = 16;
   canvas.height = 16;
   canvas.setAttribute("aria-hidden", "true");
-  const ctx = canvas.getContext("2d");
-  ctx.imageSmoothingEnabled = false;
+  let ctx = null;
 
   let enabled = true;
   try {
@@ -280,7 +275,9 @@
     if (saved === "0") enabled = false;
   } catch {}
 
-  const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+  const reducedMedia = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+  const isReduced = () => window.K1ttyAppearance?.isReducedMotion?.() ?? !!reducedMedia?.matches;
+  let lastReduced = isReduced();
   let hasPointer = false;
   let mx = window.innerWidth * 0.5;
   let my = window.innerHeight * 0.5;
@@ -295,22 +292,32 @@
   let nextBlink = 3.2;
   let lastFrame = "";
   let rafId = 0;
+  let idleTimer = 0;
   let prevTs = 0;
+  let lastX = null;
+  let lastY = null;
 
   let lastWinter = false;
 
   function draw(name) {
+    if (!enabled || document.hidden) return;
     const isWinter = document.body.classList.contains("winter-theme");
     if (name === lastFrame && isWinter === lastWinter) return;
+    if (!ctx) {
+      ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.imageSmoothingEnabled = false;
+    }
     lastFrame = name;
     lastWinter = isWinter;
     ctx.clearRect(0, 0, 16, 16);
-    const sp = (isWinter ? WINTER_SPRITES : SPRITES)[name];
+    const sprites = isWinter ? WINTER_SPRITES : SPRITES;
+    const sp = sprites[name] || (RAW[name] && (sprites[name] = bakeSprite(isWinter ? applyWinterScarf(name, RAW[name]) : RAW[name])));
     if (sp) ctx.drawImage(sp, 0, 0);
   }
 
   function refresh() {
-    if (!lastFrame) return;
+    if (!enabled || !lastFrame) return;
     const prev = lastFrame;
     lastFrame = "";
     draw(prev);
@@ -319,6 +326,9 @@
   function place() {
     const px = Math.round(cx - SIZE / 2);
     const py = Math.round(cy - SIZE / 2);
+    if (px === lastX && py === lastY) return;
+    lastX = px;
+    lastY = py;
     canvas.style.transform = `translate3d(${px}px, ${py}px, 0)`;
   }
 
@@ -330,17 +340,20 @@
 
   function step(ts) {
     rafId = 0;
-    if (!enabled || document.hidden) return;
-    const dt = prevTs ? Math.min(0.06, Math.max(0.001, (ts - prevTs) / 1000)) : 0.016;
+    if (!enabled || document.hidden || isReduced()) return;
+    const dt = prevTs ? Math.min(0.3, Math.max(0.001, (ts - prevTs) / 1000)) : 0.016;
+    const movementDt = Math.min(0.06, dt);
     prevTs = ts;
     animTime += dt;
 
-    if (hasPointer && !reduced) {
+    let moving = false;
+    if (hasPointer) {
       const dx = mx - cx;
       const dy = my - cy;
       const dist = Math.hypot(dx, dy);
 
       if (mode === "alert") {
+        moving = true;
         alertTime -= dt;
         draw("alert");
         if (alertTime <= 0) {
@@ -352,7 +365,8 @@
           idleTime = 0;
           nextBlink = 2.4 + Math.random() * 2.8;
         } else {
-          const stepDist = Math.min(WALK_SPEED * dt, dist - STOP_DIST + 1);
+          moving = true;
+          const stepDist = Math.min(WALK_SPEED * movementDt, dist - STOP_DIST + 1);
           const nx = dx / (dist || 1);
           const ny = dy / (dist || 1);
           cx += nx * stepDist;
@@ -364,6 +378,7 @@
         }
       } else {
         if (dist > WAKE_DIST) {
+          moving = true;
           if (idleTime > 9) {
             mode = "alert";
             alertTime = 0.28;
@@ -372,7 +387,8 @@
             mode = "walk";
           }
         } else if (dist < TOO_CLOSE && dist > 0.5) {
-          const push = Math.min(WALK_SPEED * 0.75 * dt, STOP_DIST - dist);
+          moving = true;
+          const push = Math.min(WALK_SPEED * 0.75 * movementDt, STOP_DIST - dist);
           cx -= (dx / dist) * push;
           cy -= (dy / dist) * push;
           clampPos();
@@ -407,23 +423,35 @@
     }
 
     place();
-    rafId = requestAnimationFrame(step);
+    if (moving) {
+      rafId = requestAnimationFrame(step);
+    } else if (hasPointer) {
+       
+       
+      idleTimer = setTimeout(() => {
+        idleTimer = 0;
+        if (enabled && !document.hidden && !isReduced()) rafId = requestAnimationFrame(step);
+      }, idleTime > 14 ? 250 : 100);
+    }
   }
 
   function startLoop() {
-    if (!enabled || rafId) return;
-    prevTs = 0;
+    if (!enabled || document.hidden || isReduced() || !hasPointer || rafId) return;
+    if (idleTimer) { clearTimeout(idleTimer); idleTimer = 0; }
     rafId = requestAnimationFrame(step);
   }
 
   function stopLoop() {
+    if (idleTimer) { clearTimeout(idleTimer); idleTimer = 0; }
     if (rafId) {
       cancelAnimationFrame(rafId);
       rafId = 0;
     }
+    prevTs = 0;
   }
 
   function setEnabled(next) {
+    if (!!next === enabled) return;
     enabled = !!next;
     try {
       localStorage.setItem(STORAGE_KEY, enabled ? "1" : "0");
@@ -440,6 +468,7 @@
   }
 
   window.addEventListener("pointermove", (ev) => {
+    if (!enabled || document.hidden || isReduced()) return;
     mx = ev.clientX;
     my = ev.clientY;
     if (!hasPointer) {
@@ -448,9 +477,11 @@
       cy = Math.max(24, Math.min(window.innerHeight - 24, my + 24));
       place();
     }
+    startLoop();
   }, { passive: true });
 
   window.addEventListener("resize", () => {
+    if (!enabled || document.hidden) return;
     clampPos();
     place();
   }, { passive: true });
@@ -459,6 +490,18 @@
     if (document.hidden) stopLoop();
     else if (enabled) startLoop();
   });
+
+  function syncMotion() {
+    const reduced = isReduced();
+    if (lastReduced === reduced) return;
+    lastReduced = reduced;
+    stopLoop();
+    if (!enabled) return;
+    draw("sit1");
+    if (!reduced) startLoop();
+  }
+  window.addEventListener("k1tty:appearancechange", syncMotion);
+  reducedMedia?.addEventListener?.("change", syncMotion);
 
   function mount() {
     document.body.appendChild(canvas);

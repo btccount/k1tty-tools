@@ -1,0 +1,3467 @@
+{
+  "antigravity|source": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "user_input",
+        "label": "user",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "tool",
+        "subtype": "thinking",
+        "label": "thinking",
+        "text": "План анализа",
+        "tool": "thinking",
+        "status": "ok",
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "planner_response",
+        "label": "assistant",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "tool",
+        "subtype": "generic",
+        "label": "write_file",
+        "text": "Файл создан 🐱",
+        "tool": "write_file",
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082403000
+      },
+      {
+        "kind": "system",
+        "subtype": "system_message",
+        "label": "system",
+        "text": "Использовать UTF-8",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082404000
+      },
+      {
+        "kind": "compact",
+        "subtype": "checkpoint",
+        "label": "compact",
+        "text": "Прежние решения сохранены",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082405000
+      },
+      {
+        "kind": "error",
+        "subtype": "error_message",
+        "label": "error",
+        "text": "Синтетическая ошибка",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082406000
+      },
+      {
+        "kind": "user",
+        "subtype": "user_input",
+        "label": "user",
+        "text": "Продолжай",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "planner_response",
+        "label": "assistant",
+        "text": "Готово",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  },
+  "antigravity|antigravity_cli|false": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "user_input",
+        "label": "user",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "planner_response",
+        "label": "assistant",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "compact",
+        "subtype": "checkpoint",
+        "label": "compact",
+        "text": "Прежние решения сохранены",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082405000
+      },
+      {
+        "kind": "user",
+        "subtype": "user_input",
+        "label": "user",
+        "text": "Продолжай",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "planner_response",
+        "label": "assistant",
+        "text": "Готово",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  },
+  "antigravity|antigravity_cli|true": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "user_input",
+        "label": "user",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "tool",
+        "subtype": "thinking",
+        "label": "thinking",
+        "text": "План анализа",
+        "tool": "thinking",
+        "status": "ok",
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "planner_response",
+        "label": "assistant",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "tool",
+        "subtype": "generic",
+        "label": "write_file",
+        "text": "Файл создан 🐱",
+        "tool": "write_file",
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082403000
+      },
+      {
+        "kind": "system",
+        "subtype": "system_message",
+        "label": "system",
+        "text": "Использовать UTF-8",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082404000
+      },
+      {
+        "kind": "compact",
+        "subtype": "checkpoint",
+        "label": "compact",
+        "text": "Прежние решения сохранены",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082405000
+      },
+      {
+        "kind": "error",
+        "subtype": "error_message",
+        "label": "error",
+        "text": "Синтетическая ошибка",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082406000
+      },
+      {
+        "kind": "user",
+        "subtype": "user_input",
+        "label": "user",
+        "text": "Продолжай",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "planner_response",
+        "label": "assistant",
+        "text": "Готово",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  },
+  "antigravity|codex|false": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "user",
+        "label": "user",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "assistant",
+        "label": "assistant",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "system",
+        "subtype": "system",
+        "label": "system",
+        "text": "Прежние решения сохранены",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082405000
+      },
+      {
+        "kind": "user",
+        "subtype": "user",
+        "label": "user",
+        "text": "Продолжай",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "assistant",
+        "label": "assistant",
+        "text": "Готово",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  },
+  "antigravity|codex|true": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "user",
+        "label": "user",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "assistant",
+        "label": "assistant",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "assistant",
+        "label": "assistant",
+        "text": "[write_file]\nФайл создан 🐱",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082403000
+      },
+      {
+        "kind": "system",
+        "subtype": "system",
+        "label": "system",
+        "text": "Использовать UTF-8",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082404000
+      },
+      {
+        "kind": "system",
+        "subtype": "system",
+        "label": "system",
+        "text": "Прежние решения сохранены",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082405000
+      },
+      {
+        "kind": "error",
+        "subtype": "codex_error",
+        "label": "Ограничение Codex",
+        "text": "Синтетическая ошибка",
+        "tool": null,
+        "status": null,
+        "code": "other",
+        "ts_ms": 1795082406000
+      },
+      {
+        "kind": "user",
+        "subtype": "user",
+        "label": "user",
+        "text": "Продолжай",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "assistant",
+        "label": "assistant",
+        "text": "Готово",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  },
+  "antigravity|claude|false": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "prompt",
+        "label": "Вы",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "reply",
+        "label": "Claude",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "compact",
+        "subtype": "compact_boundary",
+        "label": "Компакция",
+        "text": "Прежние решения сохранены",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082405000
+      },
+      {
+        "kind": "user",
+        "subtype": "prompt",
+        "label": "Вы",
+        "text": "Продолжай",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "reply",
+        "label": "Claude",
+        "text": "Готово",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  },
+  "antigravity|claude|true": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "prompt",
+        "label": "Вы",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "tool",
+        "subtype": "thinking",
+        "label": "Размышления (thinking)",
+        "text": "План анализа",
+        "tool": "thinking",
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "reply",
+        "label": "Claude",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "tool",
+        "subtype": "tool_use",
+        "label": "Команда: write_file",
+        "text": "{\n  \"summary\": \"Файл создан 🐱\"\n}",
+        "tool": "write_file",
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082403000
+      },
+      {
+        "kind": "tool",
+        "subtype": "tool_result",
+        "label": "Вывод (toolu_<id>)",
+        "text": "Файл создан 🐱",
+        "tool": "toolu_<id>",
+        "status": "ok",
+        "code": "",
+        "ts_ms": 1795082403000
+      },
+      {
+        "kind": "system",
+        "subtype": "notice",
+        "label": "Система",
+        "text": "Использовать UTF-8",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082404000
+      },
+      {
+        "kind": "compact",
+        "subtype": "compact_boundary",
+        "label": "Компакция",
+        "text": "Прежние решения сохранены",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082405000
+      },
+      {
+        "kind": "system",
+        "subtype": "notice",
+        "label": "Система",
+        "text": "Синтетическая ошибка",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082406000
+      },
+      {
+        "kind": "user",
+        "subtype": "prompt",
+        "label": "Вы",
+        "text": "Продолжай",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "reply",
+        "label": "Claude",
+        "text": "Готово",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  },
+  "antigravity|opencode|false": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "user",
+        "label": "Вы",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "text",
+        "label": "OpenCode",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "compact",
+        "subtype": "compaction",
+        "label": "Компакция",
+        "text": "Прежние решения сохранены",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082405000
+      },
+      {
+        "kind": "user",
+        "subtype": "user",
+        "label": "Вы",
+        "text": "Продолжай",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "text",
+        "label": "OpenCode",
+        "text": "Готово",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  },
+  "antigravity|opencode|true": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "user",
+        "label": "Вы",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "tool",
+        "subtype": "thinking",
+        "label": "Размышления",
+        "text": "План анализа",
+        "tool": "reasoning",
+        "status": "ok",
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "text",
+        "label": "OpenCode",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "tool",
+        "subtype": "tool_use",
+        "label": "write_file",
+        "text": "Файл создан 🐱",
+        "tool": "write_file",
+        "status": "ok",
+        "code": "",
+        "ts_ms": 1795082403000
+      },
+      {
+        "kind": "system",
+        "subtype": "system",
+        "label": "system",
+        "text": "Использовать UTF-8",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082404000
+      },
+      {
+        "kind": "compact",
+        "subtype": "compaction",
+        "label": "Компакция",
+        "text": "Прежние решения сохранены",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082405000
+      },
+      {
+        "kind": "error",
+        "subtype": "error",
+        "label": "Ошибка OpenCode",
+        "text": "Синтетическая ошибка",
+        "tool": null,
+        "status": "error",
+        "code": "aborted",
+        "ts_ms": 1795082406000
+      },
+      {
+        "kind": "user",
+        "subtype": "user",
+        "label": "Вы",
+        "text": "Продолжай",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "text",
+        "label": "OpenCode",
+        "text": "Готово",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  },
+  "antigravity_cli|source": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "user_input",
+        "label": "user",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "tool",
+        "subtype": "thinking",
+        "label": "thinking",
+        "text": "План анализа",
+        "tool": "thinking",
+        "status": "ok",
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "planner_response",
+        "label": "assistant",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "tool",
+        "subtype": "generic",
+        "label": "write_file",
+        "text": "Файл создан 🐱",
+        "tool": "write_file",
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082403000
+      },
+      {
+        "kind": "system",
+        "subtype": "system_message",
+        "label": "system",
+        "text": "Использовать UTF-8",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082404000
+      },
+      {
+        "kind": "compact",
+        "subtype": "checkpoint",
+        "label": "compact",
+        "text": "Прежние решения сохранены",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082405000
+      },
+      {
+        "kind": "error",
+        "subtype": "error_message",
+        "label": "error",
+        "text": "Синтетическая ошибка",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082406000
+      },
+      {
+        "kind": "user",
+        "subtype": "user_input",
+        "label": "user",
+        "text": "Продолжай",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "planner_response",
+        "label": "assistant",
+        "text": "Готово",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  },
+  "antigravity_cli|antigravity|false": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "user_input",
+        "label": "user",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "planner_response",
+        "label": "assistant",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "compact",
+        "subtype": "checkpoint",
+        "label": "compact",
+        "text": "Прежние решения сохранены",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082405000
+      },
+      {
+        "kind": "user",
+        "subtype": "user_input",
+        "label": "user",
+        "text": "Продолжай",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "planner_response",
+        "label": "assistant",
+        "text": "Готово",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  },
+  "antigravity_cli|antigravity|true": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "user_input",
+        "label": "user",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "tool",
+        "subtype": "thinking",
+        "label": "thinking",
+        "text": "План анализа",
+        "tool": "thinking",
+        "status": "ok",
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "planner_response",
+        "label": "assistant",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "tool",
+        "subtype": "generic",
+        "label": "write_file",
+        "text": "Файл создан 🐱",
+        "tool": "write_file",
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082403000
+      },
+      {
+        "kind": "system",
+        "subtype": "system_message",
+        "label": "system",
+        "text": "Использовать UTF-8",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082404000
+      },
+      {
+        "kind": "compact",
+        "subtype": "checkpoint",
+        "label": "compact",
+        "text": "Прежние решения сохранены",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082405000
+      },
+      {
+        "kind": "error",
+        "subtype": "error_message",
+        "label": "error",
+        "text": "Синтетическая ошибка",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082406000
+      },
+      {
+        "kind": "user",
+        "subtype": "user_input",
+        "label": "user",
+        "text": "Продолжай",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "planner_response",
+        "label": "assistant",
+        "text": "Готово",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  },
+  "antigravity_cli|codex|false": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "user",
+        "label": "user",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "assistant",
+        "label": "assistant",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "system",
+        "subtype": "system",
+        "label": "system",
+        "text": "Прежние решения сохранены",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082405000
+      },
+      {
+        "kind": "user",
+        "subtype": "user",
+        "label": "user",
+        "text": "Продолжай",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "assistant",
+        "label": "assistant",
+        "text": "Готово",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  },
+  "antigravity_cli|codex|true": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "user",
+        "label": "user",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "assistant",
+        "label": "assistant",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "assistant",
+        "label": "assistant",
+        "text": "[write_file]\nФайл создан 🐱",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082403000
+      },
+      {
+        "kind": "system",
+        "subtype": "system",
+        "label": "system",
+        "text": "Использовать UTF-8",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082404000
+      },
+      {
+        "kind": "system",
+        "subtype": "system",
+        "label": "system",
+        "text": "Прежние решения сохранены",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082405000
+      },
+      {
+        "kind": "error",
+        "subtype": "codex_error",
+        "label": "Ограничение Codex",
+        "text": "Синтетическая ошибка",
+        "tool": null,
+        "status": null,
+        "code": "other",
+        "ts_ms": 1795082406000
+      },
+      {
+        "kind": "user",
+        "subtype": "user",
+        "label": "user",
+        "text": "Продолжай",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "assistant",
+        "label": "assistant",
+        "text": "Готово",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  },
+  "antigravity_cli|claude|false": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "prompt",
+        "label": "Вы",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "reply",
+        "label": "Claude",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "compact",
+        "subtype": "compact_boundary",
+        "label": "Компакция",
+        "text": "Прежние решения сохранены",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082405000
+      },
+      {
+        "kind": "user",
+        "subtype": "prompt",
+        "label": "Вы",
+        "text": "Продолжай",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "reply",
+        "label": "Claude",
+        "text": "Готово",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  },
+  "antigravity_cli|claude|true": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "prompt",
+        "label": "Вы",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "tool",
+        "subtype": "thinking",
+        "label": "Размышления (thinking)",
+        "text": "План анализа",
+        "tool": "thinking",
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "reply",
+        "label": "Claude",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "tool",
+        "subtype": "tool_use",
+        "label": "Команда: write_file",
+        "text": "{\n  \"summary\": \"Файл создан 🐱\"\n}",
+        "tool": "write_file",
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082403000
+      },
+      {
+        "kind": "tool",
+        "subtype": "tool_result",
+        "label": "Вывод (toolu_<id>)",
+        "text": "Файл создан 🐱",
+        "tool": "toolu_<id>",
+        "status": "ok",
+        "code": "",
+        "ts_ms": 1795082403000
+      },
+      {
+        "kind": "system",
+        "subtype": "notice",
+        "label": "Система",
+        "text": "Использовать UTF-8",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082404000
+      },
+      {
+        "kind": "compact",
+        "subtype": "compact_boundary",
+        "label": "Компакция",
+        "text": "Прежние решения сохранены",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082405000
+      },
+      {
+        "kind": "system",
+        "subtype": "notice",
+        "label": "Система",
+        "text": "Синтетическая ошибка",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082406000
+      },
+      {
+        "kind": "user",
+        "subtype": "prompt",
+        "label": "Вы",
+        "text": "Продолжай",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "reply",
+        "label": "Claude",
+        "text": "Готово",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  },
+  "antigravity_cli|opencode|false": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "user",
+        "label": "Вы",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "text",
+        "label": "OpenCode",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "compact",
+        "subtype": "compaction",
+        "label": "Компакция",
+        "text": "Прежние решения сохранены",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082405000
+      },
+      {
+        "kind": "user",
+        "subtype": "user",
+        "label": "Вы",
+        "text": "Продолжай",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "text",
+        "label": "OpenCode",
+        "text": "Готово",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  },
+  "antigravity_cli|opencode|true": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "user",
+        "label": "Вы",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "tool",
+        "subtype": "thinking",
+        "label": "Размышления",
+        "text": "План анализа",
+        "tool": "reasoning",
+        "status": "ok",
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "text",
+        "label": "OpenCode",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "tool",
+        "subtype": "tool_use",
+        "label": "write_file",
+        "text": "Файл создан 🐱",
+        "tool": "write_file",
+        "status": "ok",
+        "code": "",
+        "ts_ms": 1795082403000
+      },
+      {
+        "kind": "system",
+        "subtype": "system",
+        "label": "system",
+        "text": "Использовать UTF-8",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082404000
+      },
+      {
+        "kind": "compact",
+        "subtype": "compaction",
+        "label": "Компакция",
+        "text": "Прежние решения сохранены",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082405000
+      },
+      {
+        "kind": "error",
+        "subtype": "error",
+        "label": "Ошибка OpenCode",
+        "text": "Синтетическая ошибка",
+        "tool": null,
+        "status": "error",
+        "code": "aborted",
+        "ts_ms": 1795082406000
+      },
+      {
+        "kind": "user",
+        "subtype": "user",
+        "label": "Вы",
+        "text": "Продолжай",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "text",
+        "label": "OpenCode",
+        "text": "Готово",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  },
+  "codex|source": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "user",
+        "label": "user",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "assistant",
+        "label": "assistant",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "assistant",
+        "label": "assistant",
+        "text": "[write_file]\nФайл создан 🐱",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082403000
+      },
+      {
+        "kind": "system",
+        "subtype": "system",
+        "label": "system",
+        "text": "Использовать UTF-8",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082404000
+      },
+      {
+        "kind": "system",
+        "subtype": "system",
+        "label": "system",
+        "text": "Прежние решения сохранены",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082405000
+      },
+      {
+        "kind": "error",
+        "subtype": "codex_error",
+        "label": "Ограничение Codex",
+        "text": "Синтетическая ошибка",
+        "tool": null,
+        "status": null,
+        "code": "other",
+        "ts_ms": 1795082406000
+      },
+      {
+        "kind": "user",
+        "subtype": "user",
+        "label": "user",
+        "text": "Продолжай",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "assistant",
+        "label": "assistant",
+        "text": "Готово",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  },
+  "codex|antigravity|false": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "user_input",
+        "label": "user",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "planner_response",
+        "label": "assistant",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "planner_response",
+        "label": "assistant",
+        "text": "[write_file]\nФайл создан 🐱",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082403000
+      },
+      {
+        "kind": "user",
+        "subtype": "user_input",
+        "label": "user",
+        "text": "Продолжай",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "planner_response",
+        "label": "assistant",
+        "text": "Готово",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  },
+  "codex|antigravity|true": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "user_input",
+        "label": "user",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "planner_response",
+        "label": "assistant",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "planner_response",
+        "label": "assistant",
+        "text": "[write_file]\nФайл создан 🐱",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082403000
+      },
+      {
+        "kind": "system",
+        "subtype": "system_message",
+        "label": "system",
+        "text": "Использовать UTF-8",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082404000
+      },
+      {
+        "kind": "system",
+        "subtype": "system_message",
+        "label": "system",
+        "text": "Прежние решения сохранены",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082405000
+      },
+      {
+        "kind": "error",
+        "subtype": "error_message",
+        "label": "error",
+        "text": "Синтетическая ошибка",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082406000
+      },
+      {
+        "kind": "user",
+        "subtype": "user_input",
+        "label": "user",
+        "text": "Продолжай",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "planner_response",
+        "label": "assistant",
+        "text": "Готово",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  },
+  "codex|antigravity_cli|false": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "user_input",
+        "label": "user",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "planner_response",
+        "label": "assistant",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "planner_response",
+        "label": "assistant",
+        "text": "[write_file]\nФайл создан 🐱",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082403000
+      },
+      {
+        "kind": "user",
+        "subtype": "user_input",
+        "label": "user",
+        "text": "Продолжай",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "planner_response",
+        "label": "assistant",
+        "text": "Готово",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  },
+  "codex|antigravity_cli|true": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "user_input",
+        "label": "user",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "planner_response",
+        "label": "assistant",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "planner_response",
+        "label": "assistant",
+        "text": "[write_file]\nФайл создан 🐱",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082403000
+      },
+      {
+        "kind": "system",
+        "subtype": "system_message",
+        "label": "system",
+        "text": "Использовать UTF-8",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082404000
+      },
+      {
+        "kind": "system",
+        "subtype": "system_message",
+        "label": "system",
+        "text": "Прежние решения сохранены",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082405000
+      },
+      {
+        "kind": "error",
+        "subtype": "error_message",
+        "label": "error",
+        "text": "Синтетическая ошибка",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082406000
+      },
+      {
+        "kind": "user",
+        "subtype": "user_input",
+        "label": "user",
+        "text": "Продолжай",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "planner_response",
+        "label": "assistant",
+        "text": "Готово",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  },
+  "codex|claude|false": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "prompt",
+        "label": "Вы",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "reply",
+        "label": "Claude",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "reply",
+        "label": "Claude",
+        "text": "[write_file]\nФайл создан 🐱",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082403000
+      },
+      {
+        "kind": "user",
+        "subtype": "prompt",
+        "label": "Вы",
+        "text": "Продолжай",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "reply",
+        "label": "Claude",
+        "text": "Готово",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  },
+  "codex|claude|true": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "prompt",
+        "label": "Вы",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "reply",
+        "label": "Claude",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "reply",
+        "label": "Claude",
+        "text": "[write_file]\nФайл создан 🐱",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082403000
+      },
+      {
+        "kind": "system",
+        "subtype": "notice",
+        "label": "Система",
+        "text": "Использовать UTF-8",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082404000
+      },
+      {
+        "kind": "system",
+        "subtype": "notice",
+        "label": "Система",
+        "text": "Прежние решения сохранены",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082405000
+      },
+      {
+        "kind": "system",
+        "subtype": "notice",
+        "label": "Система",
+        "text": "Синтетическая ошибка",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082406000
+      },
+      {
+        "kind": "user",
+        "subtype": "prompt",
+        "label": "Вы",
+        "text": "Продолжай",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "reply",
+        "label": "Claude",
+        "text": "Готово",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  },
+  "codex|opencode|false": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "user",
+        "label": "Вы",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "text",
+        "label": "OpenCode",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "text",
+        "label": "OpenCode",
+        "text": "[write_file]\nФайл создан 🐱",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "user",
+        "subtype": "user",
+        "label": "Вы",
+        "text": "Продолжай",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "text",
+        "label": "OpenCode",
+        "text": "Готово",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  },
+  "codex|opencode|true": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "user",
+        "label": "Вы",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "text",
+        "label": "OpenCode",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "text",
+        "label": "OpenCode",
+        "text": "[write_file]\nФайл создан 🐱",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "system",
+        "subtype": "system",
+        "label": "system",
+        "text": "Использовать UTF-8",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082404000
+      },
+      {
+        "kind": "system",
+        "subtype": "system",
+        "label": "system",
+        "text": "Прежние решения сохранены",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082405000
+      },
+      {
+        "kind": "error",
+        "subtype": "error",
+        "label": "Ошибка OpenCode",
+        "text": "Синтетическая ошибка",
+        "tool": null,
+        "status": "error",
+        "code": "aborted",
+        "ts_ms": 1795082406000
+      },
+      {
+        "kind": "user",
+        "subtype": "user",
+        "label": "Вы",
+        "text": "Продолжай",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "text",
+        "label": "OpenCode",
+        "text": "Готово",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  },
+  "claude|source": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "prompt",
+        "label": "Вы",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "tool",
+        "subtype": "thinking",
+        "label": "Размышления (thinking)",
+        "text": "План анализа",
+        "tool": "thinking",
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082401000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "reply",
+        "label": "Claude",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "tool",
+        "subtype": "tool_use",
+        "label": "Команда: write_file",
+        "text": "{\n  \"summary\": \"Файл создан 🐱\"\n}",
+        "tool": "write_file",
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082403000
+      },
+      {
+        "kind": "tool",
+        "subtype": "tool_result",
+        "label": "Вывод (toolu_<id>)",
+        "text": "Файл создан 🐱",
+        "tool": "toolu_<id>",
+        "status": "ok",
+        "code": "",
+        "ts_ms": 1795082403000
+      },
+      {
+        "kind": "system",
+        "subtype": "notice",
+        "label": "Система",
+        "text": "Использовать UTF-8",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082404000
+      },
+      {
+        "kind": "compact",
+        "subtype": "compact_boundary",
+        "label": "Компакция",
+        "text": "Прежние решения сохранены",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082405000
+      },
+      {
+        "kind": "system",
+        "subtype": "notice",
+        "label": "Система",
+        "text": "Синтетическая ошибка",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082406000
+      },
+      {
+        "kind": "user",
+        "subtype": "prompt",
+        "label": "Вы",
+        "text": "Продолжай",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "reply",
+        "label": "Claude",
+        "text": "Готово",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  },
+  "claude|antigravity|false": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "user_input",
+        "label": "user",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "planner_response",
+        "label": "assistant",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "compact",
+        "subtype": "checkpoint",
+        "label": "compact",
+        "text": "Прежние решения сохранены",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082405000
+      },
+      {
+        "kind": "user",
+        "subtype": "user_input",
+        "label": "user",
+        "text": "Продолжай",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "planner_response",
+        "label": "assistant",
+        "text": "Готово",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  },
+  "claude|antigravity|true": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "user_input",
+        "label": "user",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "tool",
+        "subtype": "thinking",
+        "label": "thinking",
+        "text": "План анализа",
+        "tool": "thinking",
+        "status": "ok",
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "planner_response",
+        "label": "assistant",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "tool",
+        "subtype": "generic",
+        "label": "write_file",
+        "text": "{\n  \"summary\": \"Файл создан 🐱\"\n}",
+        "tool": "write_file",
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082403000
+      },
+      {
+        "kind": "tool",
+        "subtype": "generic",
+        "label": "toolu_<id>",
+        "text": "Файл создан 🐱",
+        "tool": "toolu_<id>",
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082403000
+      },
+      {
+        "kind": "system",
+        "subtype": "system_message",
+        "label": "system",
+        "text": "Использовать UTF-8",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082404000
+      },
+      {
+        "kind": "compact",
+        "subtype": "checkpoint",
+        "label": "compact",
+        "text": "Прежние решения сохранены",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082405000
+      },
+      {
+        "kind": "system",
+        "subtype": "system_message",
+        "label": "system",
+        "text": "Синтетическая ошибка",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082406000
+      },
+      {
+        "kind": "user",
+        "subtype": "user_input",
+        "label": "user",
+        "text": "Продолжай",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "planner_response",
+        "label": "assistant",
+        "text": "Готово",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  },
+  "claude|antigravity_cli|false": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "user_input",
+        "label": "user",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "planner_response",
+        "label": "assistant",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "compact",
+        "subtype": "checkpoint",
+        "label": "compact",
+        "text": "Прежние решения сохранены",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082405000
+      },
+      {
+        "kind": "user",
+        "subtype": "user_input",
+        "label": "user",
+        "text": "Продолжай",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "planner_response",
+        "label": "assistant",
+        "text": "Готово",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  },
+  "claude|antigravity_cli|true": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "user_input",
+        "label": "user",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "tool",
+        "subtype": "thinking",
+        "label": "thinking",
+        "text": "План анализа",
+        "tool": "thinking",
+        "status": "ok",
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "planner_response",
+        "label": "assistant",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "tool",
+        "subtype": "generic",
+        "label": "write_file",
+        "text": "{\n  \"summary\": \"Файл создан 🐱\"\n}",
+        "tool": "write_file",
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082403000
+      },
+      {
+        "kind": "tool",
+        "subtype": "generic",
+        "label": "toolu_<id>",
+        "text": "Файл создан 🐱",
+        "tool": "toolu_<id>",
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082403000
+      },
+      {
+        "kind": "system",
+        "subtype": "system_message",
+        "label": "system",
+        "text": "Использовать UTF-8",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082404000
+      },
+      {
+        "kind": "compact",
+        "subtype": "checkpoint",
+        "label": "compact",
+        "text": "Прежние решения сохранены",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082405000
+      },
+      {
+        "kind": "system",
+        "subtype": "system_message",
+        "label": "system",
+        "text": "Синтетическая ошибка",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082406000
+      },
+      {
+        "kind": "user",
+        "subtype": "user_input",
+        "label": "user",
+        "text": "Продолжай",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "planner_response",
+        "label": "assistant",
+        "text": "Готово",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  },
+  "claude|codex|false": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "user",
+        "label": "user",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "assistant",
+        "label": "assistant",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "system",
+        "subtype": "system",
+        "label": "system",
+        "text": "Прежние решения сохранены",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082405000
+      },
+      {
+        "kind": "user",
+        "subtype": "user",
+        "label": "user",
+        "text": "Продолжай",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "assistant",
+        "label": "assistant",
+        "text": "Готово",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  },
+  "claude|codex|true": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "user",
+        "label": "user",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "assistant",
+        "label": "assistant",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "assistant",
+        "label": "assistant",
+        "text": "[write_file]\n{\n  \"summary\": \"Файл создан 🐱\"\n}",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082403000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "assistant",
+        "label": "assistant",
+        "text": "[toolu_<id>]\nФайл создан 🐱",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082403000
+      },
+      {
+        "kind": "system",
+        "subtype": "system",
+        "label": "system",
+        "text": "Использовать UTF-8",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082404000
+      },
+      {
+        "kind": "system",
+        "subtype": "system",
+        "label": "system",
+        "text": "Прежние решения сохранены",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082405000
+      },
+      {
+        "kind": "system",
+        "subtype": "system",
+        "label": "system",
+        "text": "Синтетическая ошибка",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082406000
+      },
+      {
+        "kind": "user",
+        "subtype": "user",
+        "label": "user",
+        "text": "Продолжай",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "assistant",
+        "label": "assistant",
+        "text": "Готово",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  },
+  "claude|opencode|false": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "user",
+        "label": "Вы",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "text",
+        "label": "OpenCode",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082402000
+      },
+      {
+        "kind": "compact",
+        "subtype": "compaction",
+        "label": "Компакция",
+        "text": "Прежние решения сохранены",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082405000
+      },
+      {
+        "kind": "user",
+        "subtype": "user",
+        "label": "Вы",
+        "text": "Продолжай",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "text",
+        "label": "OpenCode",
+        "text": "Готово",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  },
+  "claude|opencode|true": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "user",
+        "label": "Вы",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "tool",
+        "subtype": "thinking",
+        "label": "Размышления",
+        "text": "План анализа",
+        "tool": "reasoning",
+        "status": "ok",
+        "code": "",
+        "ts_ms": 1795082401000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "text",
+        "label": "OpenCode",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082401000
+      },
+      {
+        "kind": "tool",
+        "subtype": "tool_use",
+        "label": "write_file",
+        "text": "{\n  \"summary\": \"Файл создан 🐱\"\n}",
+        "tool": "write_file",
+        "status": "ok",
+        "code": "",
+        "ts_ms": 1795082403000
+      },
+      {
+        "kind": "tool",
+        "subtype": "tool_use",
+        "label": "toolu_<id>",
+        "text": "Файл создан 🐱",
+        "tool": "toolu_<id>",
+        "status": "ok",
+        "code": "",
+        "ts_ms": 1795082403000
+      },
+      {
+        "kind": "system",
+        "subtype": "system",
+        "label": "Система",
+        "text": "Использовать UTF-8",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082404000
+      },
+      {
+        "kind": "compact",
+        "subtype": "compaction",
+        "label": "Компакция",
+        "text": "Прежние решения сохранены",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082405000
+      },
+      {
+        "kind": "system",
+        "subtype": "system",
+        "label": "Система",
+        "text": "Синтетическая ошибка",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082406000
+      },
+      {
+        "kind": "user",
+        "subtype": "user",
+        "label": "Вы",
+        "text": "Продолжай",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "text",
+        "label": "OpenCode",
+        "text": "Готово",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  },
+  "opencode|source": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "user",
+        "label": "Вы",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "tool",
+        "subtype": "thinking",
+        "label": "Размышления",
+        "text": "План анализа",
+        "tool": "reasoning",
+        "status": "ok",
+        "code": "",
+        "ts_ms": 1795082401000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "text",
+        "label": "OpenCode",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082401000
+      },
+      {
+        "kind": "tool",
+        "subtype": "tool_use",
+        "label": "write_file",
+        "text": "Файл создан 🐱",
+        "tool": "write_file",
+        "status": "ok",
+        "code": "",
+        "ts_ms": 1795082403000
+      },
+      {
+        "kind": "system",
+        "subtype": "system",
+        "label": "Imported context",
+        "text": "Использовать UTF-8",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082404000
+      },
+      {
+        "kind": "compact",
+        "subtype": "compaction",
+        "label": "Компакция",
+        "text": "Прежние решения сохранены",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082405000
+      },
+      {
+        "kind": "error",
+        "subtype": "error",
+        "label": "Ошибка OpenCode",
+        "text": "Синтетическая ошибка",
+        "tool": null,
+        "status": "error",
+        "code": "aborted",
+        "ts_ms": 1795082406000
+      },
+      {
+        "kind": "user",
+        "subtype": "user",
+        "label": "Вы",
+        "text": "Продолжай",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "text",
+        "label": "OpenCode",
+        "text": "Готово",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  },
+  "opencode|antigravity|false": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "user_input",
+        "label": "user",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "planner_response",
+        "label": "assistant",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082401000
+      },
+      {
+        "kind": "compact",
+        "subtype": "checkpoint",
+        "label": "compact",
+        "text": "Прежние решения сохранены",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082405000
+      },
+      {
+        "kind": "user",
+        "subtype": "user_input",
+        "label": "user",
+        "text": "Продолжай",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "planner_response",
+        "label": "assistant",
+        "text": "Готово",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  },
+  "opencode|antigravity|true": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "user_input",
+        "label": "user",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "tool",
+        "subtype": "thinking",
+        "label": "thinking",
+        "text": "План анализа",
+        "tool": "thinking",
+        "status": "ok",
+        "code": "",
+        "ts_ms": 1795082401000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "planner_response",
+        "label": "assistant",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082401000
+      },
+      {
+        "kind": "tool",
+        "subtype": "generic",
+        "label": "write_file",
+        "text": "Файл создан 🐱",
+        "tool": "write_file",
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082403000
+      },
+      {
+        "kind": "system",
+        "subtype": "system_message",
+        "label": "system",
+        "text": "Использовать UTF-8",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082404000
+      },
+      {
+        "kind": "compact",
+        "subtype": "checkpoint",
+        "label": "compact",
+        "text": "Прежние решения сохранены",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082405000
+      },
+      {
+        "kind": "error",
+        "subtype": "error_message",
+        "label": "error",
+        "text": "Синтетическая ошибка",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082406000
+      },
+      {
+        "kind": "user",
+        "subtype": "user_input",
+        "label": "user",
+        "text": "Продолжай",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "planner_response",
+        "label": "assistant",
+        "text": "Готово",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  },
+  "opencode|antigravity_cli|false": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "user_input",
+        "label": "user",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "planner_response",
+        "label": "assistant",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082401000
+      },
+      {
+        "kind": "compact",
+        "subtype": "checkpoint",
+        "label": "compact",
+        "text": "Прежние решения сохранены",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082405000
+      },
+      {
+        "kind": "user",
+        "subtype": "user_input",
+        "label": "user",
+        "text": "Продолжай",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "planner_response",
+        "label": "assistant",
+        "text": "Готово",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  },
+  "opencode|antigravity_cli|true": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "user_input",
+        "label": "user",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "tool",
+        "subtype": "thinking",
+        "label": "thinking",
+        "text": "План анализа",
+        "tool": "thinking",
+        "status": "ok",
+        "code": "",
+        "ts_ms": 1795082401000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "planner_response",
+        "label": "assistant",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082401000
+      },
+      {
+        "kind": "tool",
+        "subtype": "generic",
+        "label": "write_file",
+        "text": "Файл создан 🐱",
+        "tool": "write_file",
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082403000
+      },
+      {
+        "kind": "system",
+        "subtype": "system_message",
+        "label": "system",
+        "text": "Использовать UTF-8",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082404000
+      },
+      {
+        "kind": "compact",
+        "subtype": "checkpoint",
+        "label": "compact",
+        "text": "Прежние решения сохранены",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082405000
+      },
+      {
+        "kind": "error",
+        "subtype": "error_message",
+        "label": "error",
+        "text": "Синтетическая ошибка",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082406000
+      },
+      {
+        "kind": "user",
+        "subtype": "user_input",
+        "label": "user",
+        "text": "Продолжай",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "planner_response",
+        "label": "assistant",
+        "text": "Готово",
+        "tool": null,
+        "status": "DONE",
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  },
+  "opencode|codex|false": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "user",
+        "label": "user",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "assistant",
+        "label": "assistant",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082401000
+      },
+      {
+        "kind": "system",
+        "subtype": "system",
+        "label": "system",
+        "text": "Прежние решения сохранены",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082405000
+      },
+      {
+        "kind": "user",
+        "subtype": "user",
+        "label": "user",
+        "text": "Продолжай",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "assistant",
+        "label": "assistant",
+        "text": "Готово",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  },
+  "opencode|codex|true": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "user",
+        "label": "user",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "assistant",
+        "label": "assistant",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082401000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "assistant",
+        "label": "assistant",
+        "text": "[write_file]\nФайл создан 🐱",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082403000
+      },
+      {
+        "kind": "system",
+        "subtype": "system",
+        "label": "system",
+        "text": "Использовать UTF-8",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082404000
+      },
+      {
+        "kind": "system",
+        "subtype": "system",
+        "label": "system",
+        "text": "Прежние решения сохранены",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082405000
+      },
+      {
+        "kind": "error",
+        "subtype": "codex_error",
+        "label": "Ограничение Codex",
+        "text": "Синтетическая ошибка",
+        "tool": null,
+        "status": null,
+        "code": "other",
+        "ts_ms": 1795082406000
+      },
+      {
+        "kind": "user",
+        "subtype": "user",
+        "label": "user",
+        "text": "Продолжай",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "assistant",
+        "label": "assistant",
+        "text": "Готово",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  },
+  "opencode|claude|false": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "prompt",
+        "label": "Вы",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "reply",
+        "label": "Claude",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082401000
+      },
+      {
+        "kind": "compact",
+        "subtype": "compact_boundary",
+        "label": "Компакция",
+        "text": "Прежние решения сохранены",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082405000
+      },
+      {
+        "kind": "user",
+        "subtype": "prompt",
+        "label": "Вы",
+        "text": "Продолжай",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "reply",
+        "label": "Claude",
+        "text": "Готово",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  },
+  "opencode|claude|true": {
+    "title": "Проверка 🐱",
+    "entries": [
+      {
+        "kind": "user",
+        "subtype": "prompt",
+        "label": "Вы",
+        "text": "Задача: сохранить контекст",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082400000
+      },
+      {
+        "kind": "tool",
+        "subtype": "thinking",
+        "label": "Размышления (thinking)",
+        "text": "План анализа",
+        "tool": "thinking",
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082401000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "reply",
+        "label": "Claude",
+        "text": "Начинаю работу",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082401000
+      },
+      {
+        "kind": "tool",
+        "subtype": "tool_use",
+        "label": "Команда: write_file",
+        "text": "{\n  \"summary\": \"Файл создан 🐱\"\n}",
+        "tool": "write_file",
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082403000
+      },
+      {
+        "kind": "tool",
+        "subtype": "tool_result",
+        "label": "Вывод (toolu_<id>)",
+        "text": "Файл создан 🐱",
+        "tool": "toolu_<id>",
+        "status": "ok",
+        "code": "",
+        "ts_ms": 1795082403000
+      },
+      {
+        "kind": "system",
+        "subtype": "notice",
+        "label": "Система",
+        "text": "Использовать UTF-8",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082404000
+      },
+      {
+        "kind": "compact",
+        "subtype": "compact_boundary",
+        "label": "Компакция",
+        "text": "Прежние решения сохранены",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082405000
+      },
+      {
+        "kind": "system",
+        "subtype": "notice",
+        "label": "Система",
+        "text": "Синтетическая ошибка",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082406000
+      },
+      {
+        "kind": "user",
+        "subtype": "prompt",
+        "label": "Вы",
+        "text": "Продолжай",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082407000
+      },
+      {
+        "kind": "assistant",
+        "subtype": "reply",
+        "label": "Claude",
+        "text": "Готово",
+        "tool": null,
+        "status": null,
+        "code": "",
+        "ts_ms": 1795082408000
+      }
+    ]
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "k1tty-tools",
+  "version": "2.0.0",
+  "private": true,
+  "description": "K1tty Tools native desktop application",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "build:ui": "node scripts/build-ui.mjs",
+    "check:ui": "node --check static/app.js && node --check static/desktop.js && node --check static/appearance.js && node --check static/winter.js && node --check static/pixel-cat.js",
+    "test": "cargo test -p k1tty-core",
+    "tauri": "tauri",
+    "test:titlebar": "node scripts/test-titlebar.mjs",
+    "test:ui": "node scripts/test-ui-polish.mjs && node scripts/test-titlebar.mjs && node scripts/test-desktop-shell.mjs && node scripts/test-appearance.mjs && node scripts/test-transcript-state.mjs && node scripts/test-ui-motion.mjs && node scripts/test-sidebar-motion.mjs",
+    "test:ui:dom": "node scripts/test-ui-dom.mjs && node scripts/test-transcript-dom.mjs && node scripts/test-color-picker.mjs && node scripts/test-import-dom.mjs && node scripts/test-claude-notices-dom.mjs",
+    "test:ui:browser": "node scripts/test-transcript-async.mjs"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.10.1"
+  }
+}
