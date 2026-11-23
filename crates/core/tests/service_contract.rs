@@ -691,35 +691,36 @@ fn antigravity_live_unlock_rpc_flow_works_and_rejects_other_providers() {
             .is_err());
     }
 
-    #[cfg(unix)]
     let _holder = {
-        use fs2::FileExt;
         let p = h.service.provider("antigravity").unwrap();
         let pdir = p.paths().root.join("presence");
         fs::create_dir_all(&pdir).unwrap();
-        let holder = fs::File::create(pdir.join(format!("{cid}.lock"))).unwrap();
-        holder.lock_exclusive().unwrap();
+        let holder = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(pdir.join(format!("{cid}.lock")))
+            .unwrap();
+        holder.lock().unwrap();
         holder
     };
 
-    #[cfg(unix)]
-    {
-        let locked_entries = h.rpc("entries", "antigravity", json!({"cid": cid}));
-        assert_eq!(locked_entries["file_locked"], true);
-        assert_eq!(locked_entries["presence_locked"], true);
-        assert_eq!(locked_entries["live_unlocked"], false);
-        assert_eq!(locked_entries["can_unlock_db"], true);
+    let locked_entries = h.rpc("entries", "antigravity", json!({"cid": cid}));
+    assert_eq!(locked_entries["file_locked"], true);
+    assert_eq!(locked_entries["presence_locked"], true);
+    assert_eq!(locked_entries["live_unlocked"], false);
+    assert_eq!(locked_entries["can_unlock_db"], true);
 
-        // Write is blocked before unlock_db.
-        assert!(h
-            .service
-            .rpc(
-                "apply_edit",
-                Some("antigravity"),
-                json!({"cid": cid, "key": "1", "text": "blocked", "confirm": true})
-            )
-            .is_err());
-    }
+    // Write is blocked before unlock_db.
+    assert!(h
+        .service
+        .rpc(
+            "apply_edit",
+            Some("antigravity"),
+            json!({"cid": cid, "key": "1", "text": "blocked", "confirm": true})
+        )
+        .is_err());
 
     // Unlock DB via RPC and verify conv_lock event + live edit + restore + relock.
     let unlocked = h.rpc("unlock_db", "antigravity", json!({"cid": cid}));
@@ -753,7 +754,6 @@ fn antigravity_live_unlock_rpc_flow_works_and_rejects_other_providers() {
 
     let relocked = h.rpc("relock_db", "antigravity", json!({"cid": cid}));
     assert_eq!(relocked["live_unlocked"], false);
-    #[cfg(unix)]
     assert_eq!(relocked["locked"], true);
 
     // Enabling auto_restart_hub automatically unlocks presence-locked chats and persists across restarts.

@@ -3320,7 +3320,7 @@ function syncRunningGuard() {
     if (autoHubBtn) {
       autoHubBtn.classList.toggle("hidden", !isAg);
       autoHubBtn.disabled = busy;
-      if (autoHubLbl) autoHubLbl.textContent = t("auto_hub_on_btn");
+      if (autoHubLbl) autoHubLbl.textContent = t(autoHubOn ? "auto_hub_off_btn" : "auto_hub_on_btn");
     }
     if (restartBtn) {
       restartBtn.classList.toggle("hidden", !canRestart);
@@ -3354,7 +3354,7 @@ function syncRunningGuard() {
     if (autoHubBtn) {
       autoHubBtn.classList.toggle("hidden", !isAg);
       autoHubBtn.disabled = busy;
-      if (autoHubLbl) autoHubLbl.textContent = t("auto_hub_on_btn");
+      if (autoHubLbl) autoHubLbl.textContent = t(autoHubOn ? "auto_hub_off_btn" : "auto_hub_on_btn");
     }
     if (restartBtn) {
       restartBtn.classList.toggle("hidden", !canRestart);

@@ -5,7 +5,7 @@ use std::{
     sync::{Mutex, OnceLock},
     time::{Duration, Instant},
 };
-use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, Signal, System, UpdateKind};
+use sysinfo::{Pid, ProcessRefreshKind, ProcessStatus, ProcessesToUpdate, System, UpdateKind};
 
 pub type ProcessMap = BTreeMap<String, Vec<String>>;
 
@@ -157,13 +157,13 @@ pub fn classify(
         {
             Some(("antigravity", "Antigravity Desktop"))
         }
-        "language_server.exe" | "language_server"
-            if exe.contains("antigravity-cli") || cmd.contains("antigravity-cli") =>
+        n if is_ag_language_server_name(n)
+            && (exe.contains("antigravity-cli") || cmd.contains("antigravity-cli")) =>
         {
             Some(("antigravity_cli", "Antigravity CLI Hub"))
         }
-        "language_server.exe" | "language_server"
-            if exe.contains("antigravity") || cmd.contains("antigravity") =>
+        n if is_ag_language_server_name(n)
+            && (exe.contains("antigravity") || cmd.contains("antigravity")) =>
         {
             Some(("antigravity", "Antigravity Hub"))
         }
@@ -365,6 +365,30 @@ mod win {
     #[link(name = "dwmapi")]
     extern "system" {
         fn DwmGetWindowAttribute(hwnd: Hwnd, attribute: u32, value: *mut u32, size: u32) -> i32;
+    }
+
+    const PROCESS_TERMINATE: u32 = 0x0001;
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn OpenProcess(desired_access: u32, inherit_handle: i32, process_id: u32) -> isize;
+        fn TerminateProcess(process: isize, exit_code: u32) -> i32;
+        fn CloseHandle(object: isize) -> i32;
+    }
+
+    pub fn terminate_pid(pid: u32) -> bool {
+        if pid == 0 {
+            return false;
+        }
+        unsafe {
+            let handle = OpenProcess(PROCESS_TERMINATE, 0, pid);
+            if handle == 0 {
+                return false;
+            }
+            let ok = TerminateProcess(handle, 1) != 0;
+            CloseHandle(handle);
+            ok
+        }
     }
 
     unsafe extern "system" fn enum_proc(hwnd: Hwnd, l_param: isize) -> i32 {
@@ -705,6 +729,11 @@ pub fn format_running(items: &[String]) -> String {
         .join(", ")
 }
 
+fn is_ag_language_server_name(name: &str) -> bool {
+    matches!(name, "language_server" | "language_server.exe")
+        || name.starts_with("language_server_")
+}
+
 fn is_matching_ag_hub(
     provider_id: &str,
     name: &str,
@@ -712,10 +741,12 @@ fn is_matching_ag_hub(
     cmd: &str,
     from_daemon_file: bool,
 ) -> bool {
-    if !matches!(name, "language_server" | "language_server.exe") {
+    if !is_ag_language_server_name(name) {
         return false;
     }
-    let is_cli = exe.contains("antigravity-cli") || cmd.contains("antigravity-cli");
+    let is_cli = exe.contains("antigravity-cli")
+        || cmd.contains("antigravity-cli")
+        || cmd.contains("antigravity_cli");
     match provider_id {
         "antigravity_cli" => is_cli || from_daemon_file,
         "antigravity" => {
@@ -723,6 +754,21 @@ fn is_matching_ag_hub(
                 && (from_daemon_file || exe.contains("antigravity") || cmd.contains("antigravity"))
         }
         _ => false,
+    }
+}
+
+fn terminate_hub_process(uid: u32, proc_info: &sysinfo::Process) -> bool {
+    #[cfg(windows)]
+    {
+        win::terminate_pid(uid) || proc_info.kill()
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = uid;
+        match proc_info.kill_with(sysinfo::Signal::Term) {
+            Some(ok) => ok,
+            None => proc_info.kill(),
+        }
     }
 }
 
@@ -772,6 +818,12 @@ pub fn stop_antigravity_hubs(provider_id: &str, daemon_dir: &Path, scan_global: 
         if uid == self_pid {
             continue;
         }
+        if matches!(
+            proc_info.status(),
+            ProcessStatus::Zombie | ProcessStatus::Dead
+        ) {
+            continue;
+        }
         let from_daemon = daemon_pids.contains(&uid);
         if !scan_global && !from_daemon {
             continue;
@@ -788,14 +840,10 @@ pub fn stop_antigravity_hubs(provider_id: &str, daemon_dir: &Path, scan_global: 
             .collect::<Vec<_>>()
             .join(" ")
             .to_lowercase();
-        if is_matching_ag_hub(provider_id, &name, &exe, &cmd, from_daemon) {
-            let sent = match proc_info.kill_with(Signal::Term) {
-                Some(ok) => ok,
-                None => proc_info.kill(),
-            };
-            if sent {
-                signaled.insert(uid);
-            }
+        if is_matching_ag_hub(provider_id, &name, &exe, &cmd, from_daemon)
+            && terminate_hub_process(uid, proc_info)
+        {
+            signaled.insert(uid);
         }
     }
     signaled.into_iter().collect()
@@ -812,7 +860,11 @@ pub fn any_pid_alive(pids: &[u32]) -> bool {
         true,
         ProcessRefreshKind::nothing(),
     );
-    targets.iter().any(|pid| system.process(*pid).is_some())
+    targets.iter().any(|pid| {
+        system
+            .process(*pid)
+            .is_some_and(|p| !matches!(p.status(), ProcessStatus::Zombie | ProcessStatus::Dead))
+    })
 }
 
 #[cfg(test)]
@@ -1129,6 +1181,7 @@ mod tests {
 
     #[test]
     fn matches_only_target_antigravity_hub_processes() {
+        // macOS
         assert!(is_matching_ag_hub(
             "antigravity",
             "language_server",
@@ -1136,11 +1189,103 @@ mod tests {
             "language_server --standalone",
             false
         ));
+        assert!(is_matching_ag_hub(
+            "antigravity",
+            "language_server_macos_arm",
+            "/applications/antigravity.app/contents/resources/bin/language_server_macos_arm",
+            "language_server_macos_arm --standalone",
+            false
+        ));
+        // Windows (plain and arch-suffixed binaries)
+        assert!(is_matching_ag_hub(
+            "antigravity",
+            "language_server.exe",
+            "c:\\users\\u\\appdata\\local\\programs\\antigravity\\resources\\bin\\language_server.exe",
+            "language_server.exe --standalone --override_ide_name antigravity",
+            false
+        ));
+        assert!(is_matching_ag_hub(
+            "antigravity",
+            "language_server_windows_x64.exe",
+            "c:\\users\\u\\appdata\\local\\programs\\antigravity\\resources\\app\\extensions\\antigravity\\bin\\language_server_windows_x64.exe",
+            "language_server_windows_x64.exe --standalone",
+            false
+        ));
+        assert!(is_matching_ag_hub(
+            "antigravity_cli",
+            "language_server_windows_x64.exe",
+            "c:\\users\\u\\.gemini\\antigravity-cli\\bin\\language_server_windows_x64.exe",
+            "language_server_windows_x64.exe --app_data_dir antigravity-cli",
+            false
+        ));
+        assert!(!is_matching_ag_hub(
+            "antigravity",
+            "language_server_windows_x64.exe",
+            "c:\\users\\u\\.gemini\\antigravity-cli\\bin\\language_server_windows_x64.exe",
+            "language_server_windows_x64.exe --app_data_dir antigravity-cli",
+            true
+        ));
+        // Linux (full name and 15-byte /proc/<pid>/comm truncated "language_server")
+        assert!(is_matching_ag_hub(
+            "antigravity",
+            "language_server_linux_x64",
+            "/usr/share/antigravity/resources/app/extensions/antigravity/bin/language_server_linux_x64",
+            "language_server_linux_x64 --standalone",
+            false
+        ));
+        assert!(is_matching_ag_hub(
+            "antigravity",
+            "language_server",
+            "/usr/share/antigravity/resources/app/extensions/antigravity/bin/language_server_linux_x64",
+            "/usr/share/antigravity/resources/app/extensions/antigravity/bin/language_server_linux_x64",
+            false
+        ));
+        assert!(is_matching_ag_hub(
+            "antigravity_cli",
+            "language_server",
+            "/home/u/.gemini/antigravity-cli/bin/language_server_linux_x64",
+            "language_server_linux_x64 --app_data_dir antigravity-cli",
+            false
+        ));
+        // Classification of arch-suffixed hub binaries on Windows and Linux
+        assert_eq!(
+            classify(
+                "language_server_windows_x64.exe",
+                "c:\\users\\u\\appdata\\local\\programs\\antigravity\\bin\\language_server_windows_x64.exe",
+                "",
+                ""
+            ),
+            Some(("antigravity", "Antigravity Hub"))
+        );
+        assert_eq!(
+            classify(
+                "language_server_linux_x64",
+                "/home/u/.gemini/antigravity-cli/bin/language_server_linux_x64",
+                "",
+                ""
+            ),
+            Some(("antigravity_cli", "Antigravity CLI Hub"))
+        );
+        // Reject Desktop app, wrong provider, and unrelated language servers even if PID was recycled
         assert!(!is_matching_ag_hub(
             "antigravity",
             "antigravity",
             "/applications/antigravity.app/contents/macos/antigravity",
             "/applications/antigravity.app/contents/macos/antigravity",
+            true
+        ));
+        assert!(!is_matching_ag_hub(
+            "antigravity",
+            "antigravity.exe",
+            "c:\\users\\u\\appdata\\local\\programs\\antigravity\\antigravity.exe",
+            "antigravity.exe",
+            true
+        ));
+        assert!(!is_matching_ag_hub(
+            "antigravity",
+            "rust-analyzer",
+            "/usr/bin/rust-analyzer",
+            "rust-analyzer",
             true
         ));
         assert!(!is_matching_ag_hub(

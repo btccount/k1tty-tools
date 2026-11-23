@@ -2,8 +2,6 @@ use crate::pbwire::{self, bytes_at, encode_field, parse_fields, string_at};
 use crate::provider::{OpContext, Provider, ProviderPaths};
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use chrono::{DateTime, Local, Utc};
-#[cfg(unix)]
-use fs2::FileExt;
 use regex::Regex;
 use rusqlite::{params, types::Value as SqlValue, Connection, OpenFlags, OptionalExtension};
 use serde_json::{json, Value};
@@ -146,16 +144,154 @@ fn size(path: &Path) -> u64 {
         .map(|m| m.len())
         .sum()
 }
+#[cfg(windows)]
+fn is_win_sharing_or_access_error(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        cause
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|ioe| matches!(ioe.raw_os_error(), Some(5 | 32 | 33 | 145)))
+    })
+}
 fn atomic(path: &Path, data: &[u8]) -> Result<()> {
-    let parent = path.parent().ok_or_else(|| anyhow!("Path has no parent"))?;
-    fs::create_dir_all(parent)?;
-    let mut temp = tempfile::NamedTempFile::new_in(parent)?;
-    if let Ok(meta) = fs::metadata(path) {
-        temp.as_file().set_permissions(meta.permissions())?;
+    match crate::storage::atomic_write(path, data) {
+        Ok(()) => Ok(()),
+        #[cfg(windows)]
+        Err(err) if is_win_sharing_or_access_error(&err) => {
+            let mut last_err = err;
+            for _ in 0..3 {
+                std::thread::sleep(Duration::from_millis(40));
+                match crate::storage::atomic_write(path, data) {
+                    Ok(()) => return Ok(()),
+                    Err(e) if is_win_sharing_or_access_error(&e) => last_err = e,
+                    Err(e) => return Err(e),
+                }
+            }
+            if path.is_file() {
+                let mut f = fs::OpenOptions::new()
+                    .write(true)
+                    .truncate(true)
+                    .open(path)?;
+                f.write_all(data)?;
+                f.sync_all()?;
+                return Ok(());
+            }
+            Err(last_err)
+        }
+        Err(err) => Err(err),
     }
-    temp.write_all(data)?;
-    temp.as_file().sync_all()?;
-    temp.persist(path).map_err(|e| e.error)?;
+}
+fn remove_file_retry(path: &Path) -> Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+    #[cfg(windows)]
+    {
+        let mut last_err = None;
+        for attempt in 0..8 {
+            match fs::remove_file(path) {
+                Ok(()) => return Ok(()),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+                Err(e) if matches!(e.raw_os_error(), Some(5 | 32 | 33)) && attempt < 7 => {
+                    last_err = Some(e);
+                    std::thread::sleep(Duration::from_millis(60));
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+        if let Some(e) = last_err {
+            return Err(e.into());
+        }
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        match fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e.into()),
+        }
+    }
+}
+fn remove_dir_all_retry(path: &Path) -> Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+    #[cfg(windows)]
+    {
+        let mut last_err = None;
+        for attempt in 0..8 {
+            match fs::remove_dir_all(path) {
+                Ok(()) => return Ok(()),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+                Err(e) if matches!(e.raw_os_error(), Some(5 | 32 | 33 | 145)) && attempt < 7 => {
+                    last_err = Some(e);
+                    std::thread::sleep(Duration::from_millis(60));
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+        if let Some(e) = last_err {
+            return Err(e.into());
+        }
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        match fs::remove_dir_all(path) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e.into()),
+        }
+    }
+}
+fn sync_tree_safe(src: &Path, dst: &Path) -> Result<()> {
+    if !src.exists() {
+        return Ok(());
+    }
+    if !dst.exists() || remove_dir_all_retry(dst).is_ok() {
+        return copy_tree(src, dst);
+    }
+    let mut expected = BTreeSet::new();
+    for e in walkdir::WalkDir::new(src).follow_links(false) {
+        let e = e?;
+        let rel = e.path().strip_prefix(src)?.to_path_buf();
+        if e.file_type().is_symlink() {
+            bail!(
+                "Символические ссылки в данных диалога не копируются: {}",
+                e.path().display()
+            );
+        }
+        if e.file_type().is_dir() {
+            expected.insert(rel.clone());
+            fs::create_dir_all(dst.join(&rel))?;
+        } else if e.file_type().is_file()
+            && e.path().extension().and_then(|s| s.to_str()) != Some("tmp")
+        {
+            expected.insert(rel.clone());
+            let target = dst.join(&rel);
+            let bytes = fs::read(e.path())?;
+            atomic(&target, &bytes)?;
+            let _ = preserve_times(e.path(), &target);
+        }
+    }
+    for e in walkdir::WalkDir::new(dst)
+        .follow_links(false)
+        .contents_first(true)
+        .into_iter()
+        .filter_map(Result::ok)
+    {
+        let Ok(rel) = e.path().strip_prefix(dst) else {
+            continue;
+        };
+        if rel.as_os_str().is_empty() || expected.contains(rel) {
+            continue;
+        }
+        if e.file_type().is_dir() {
+            let _ = fs::remove_dir(e.path());
+        } else {
+            let _ = remove_file_retry(e.path());
+        }
+    }
     Ok(())
 }
 fn preserve_times(src: &Path, dst: &Path) -> Result<()> {
@@ -527,16 +663,34 @@ impl AntigravityProvider {
     }
     fn presence_guard(&self, cid: &str) -> Result<Option<File>> {
         safe_id(cid)?;
-        #[cfg(unix)]
-        {
-            let p = self.paths.root.join("presence").join(format!("{cid}.lock"));
-            if p.is_file() {
-                let file = File::open(p)?;
-                file.try_lock_exclusive().context("presence lock активен")?;
-                return Ok(Some(file));
-            }
+        let p = self.paths.root.join("presence").join(format!("{cid}.lock"));
+        if !p.is_file() {
+            return Ok(None);
         }
-        Ok(None)
+        #[cfg(windows)]
+        let file = match fs::OpenOptions::new().read(true).write(true).open(&p) {
+            Ok(f) => f,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(err) if matches!(err.raw_os_error(), Some(32 | 33)) => {
+                bail!("presence lock активен ({err})");
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => {
+                match File::open(&p) {
+                    Ok(f) => f,
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+                    Err(e) => bail!("presence lock активен ({e})"),
+                }
+            }
+            Err(err) => return Err(err.into()),
+        };
+        #[cfg(not(windows))]
+        let file = match File::open(&p) {
+            Ok(f) => f,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(err) => return Err(err.into()),
+        };
+        file.try_lock().context("presence lock активен")?;
+        Ok(Some(file))
     }
     fn is_live_unlocked(&self, cid: &str) -> bool {
         self.live_unlocked
@@ -551,7 +705,7 @@ impl AntigravityProvider {
         self.is_auto_restart_hub() || self.is_live_unlocked(cid)
     }
     fn is_isolated_root(&self) -> bool {
-        if self.test_mode() {
+        if self.test_mode() || std::env::var_os("K1TTY_TEST_ROOT").is_some() {
             return true;
         }
         let tmp = std::env::temp_dir();
@@ -1221,11 +1375,7 @@ impl AntigravityProvider {
         restore_db_safe(&p.join(format!("{cid}.db")), &self.db(cid))?;
         let source = p.join("brain").join(cid).join(".system_generated");
         if source.exists() {
-            let dest = self.brain(cid);
-            if dest.exists() {
-                fs::remove_dir_all(&dest)?;
-            }
-            copy_tree(&source, &dest)?;
+            sync_tree_safe(&source, &self.brain(cid))?;
         }
         if p.join("conversation_summaries.db").is_file() {
             restore_db_safe(&p.join("conversation_summaries.db"), &self.summaries())?;
@@ -2082,27 +2232,27 @@ impl AntigravityProvider {
     }
     fn delete_conv(&self, cid: &str, ctx: &OpContext) -> Result<Value> {
         let (guard, mut warns) = self.write_gate(cid)?;
+        let mut guard = Some(guard);
         let backup = if ctx.auto_backup {
             ctx.phase("backup");
             Some(self.full_backup(cid, "delete_conv")?)
         } else {
             None
         };
+        let (mut hub_restarted, mut hub_pids) = (false, Vec::new());
+        if cfg!(windows) && ctx.auto_restart_hub {
+            guard.take();
+            (hub_restarted, hub_pids) = self.maybe_auto_restart_hub(Some(cid), ctx, &mut warns);
+        }
         ctx.phase("cut");
         let result = (|| -> Result<()> {
             for suffix in ["", "-wal", "-shm"] {
                 let p = PathBuf::from(format!("{}{suffix}", self.db(cid).display()));
-                if p.exists() {
-                    fs::remove_file(p)?;
-                }
+                remove_file_retry(&p)?;
             }
             let brain = self.paths.root.join("brain").join(cid);
-            if brain.exists() {
-                fs::remove_dir_all(brain)?;
-            }
-            if self.annotation(cid).exists() {
-                fs::remove_file(self.annotation(cid))?;
-            }
+            remove_dir_all_retry(&brain)?;
+            remove_file_retry(&self.annotation(cid))?;
             if self.summaries().is_file() {
                 let mut con = rw(&self.summaries())?;
                 let tx = con.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -2127,7 +2277,7 @@ impl AntigravityProvider {
             }
             Ok(())
         })();
-        drop(guard);
+        guard.take();
         if let Err(error) = result {
             if let Some(b) = &backup {
                 self.restore(b).with_context(|| {
@@ -2136,6 +2286,15 @@ impl AntigravityProvider {
                         b.display()
                     )
                 })?;
+            }
+            #[cfg(windows)]
+            if is_win_sharing_or_access_error(&error) {
+                return Err(error).with_context(|| {
+                    format!(
+                        "Файлы диалога {} удерживаются процессом language_server.exe. Перезапустите Hub или включите «Авто-рестарт Antigravity Hub».",
+                        self.paths.name
+                    )
+                });
             }
             return Err(error);
         }
@@ -2147,7 +2306,9 @@ impl AntigravityProvider {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .remove(cid);
-        let (hub_restarted, hub_pids) = self.maybe_auto_restart_hub(Some(cid), ctx, &mut warns);
+        if !hub_restarted {
+            (hub_restarted, hub_pids) = self.maybe_auto_restart_hub(Some(cid), ctx, &mut warns);
+        }
         self.invalidate(Some(cid));
         ctx.phase("done");
         Ok(
@@ -3240,26 +3401,31 @@ mod tests {
             .unwrap();
         assert_eq!(initial_rows, 4);
 
-        #[cfg(unix)]
-        let (db_ino_before, sum_ino_before, _presence_holder) = {
-            use std::os::unix::fs::MetadataExt;
-            let pdir = p.paths.root.join("presence");
-            fs::create_dir_all(&pdir).unwrap();
-            let lock_path = pdir.join(format!("{CID}.lock"));
-            let holder = File::create(&lock_path).unwrap();
-            holder.lock_exclusive().unwrap();
-            let db_ino = fs::metadata(p.db(CID)).unwrap().ino();
-            let sum_ino = fs::metadata(p.summaries()).unwrap().ino();
-            (db_ino, sum_ino, holder)
-        };
+        let pdir = p.paths.root.join("presence");
+        fs::create_dir_all(&pdir).unwrap();
+        let lock_path = pdir.join(format!("{CID}.lock"));
+        let _presence_holder = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&lock_path)
+            .unwrap();
+        _presence_holder.lock().unwrap();
 
         #[cfg(unix)]
-        {
-            assert!(p.probe_lock(Some(CID)).unwrap().is_some());
-            assert!(p
-                .apply_edit(CID, 1, "should fail while locked", &OpContext::default())
-                .is_err());
-        }
+        let (db_ino_before, sum_ino_before) = {
+            use std::os::unix::fs::MetadataExt;
+            (
+                fs::metadata(p.db(CID)).unwrap().ino(),
+                fs::metadata(p.summaries()).unwrap().ino(),
+            )
+        };
+
+        assert!(p.probe_lock(Some(CID)).unwrap().is_some());
+        assert!(p
+            .apply_edit(CID, 1, "should fail while locked", &OpContext::default())
+            .is_err());
 
         let unlock_res = p.unlock_db(CID).unwrap();
         assert_eq!(unlock_res["live_unlocked"], true);
@@ -3270,7 +3436,6 @@ mod tests {
             .apply_edit(CID, 1, "edited live in WAL", &OpContext::default())
             .unwrap();
         let backup_dir = rep["backup"].as_str().unwrap().to_owned();
-        #[cfg(unix)]
         assert!(rep["warns"]
             .as_array()
             .unwrap()
@@ -3309,11 +3474,11 @@ mod tests {
             use std::os::unix::fs::MetadataExt;
             assert_eq!(fs::metadata(p.db(CID)).unwrap().ino(), db_ino_before);
             assert_eq!(fs::metadata(p.summaries()).unwrap().ino(), sum_ino_before);
-
-            let relock = p.relock_db(CID).unwrap();
-            assert_eq!(relock["live_unlocked"], false);
-            assert_eq!(relock["locked"], true);
-            assert!(p.probe_lock(Some(CID)).unwrap().is_some());
         }
+
+        let relock = p.relock_db(CID).unwrap();
+        assert_eq!(relock["live_unlocked"], false);
+        assert_eq!(relock["locked"], true);
+        assert!(p.probe_lock(Some(CID)).unwrap().is_some());
     }
 }
