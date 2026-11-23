@@ -341,7 +341,7 @@ fn settings_persist_and_control_backup_creation() {
     assert_eq!(settings["settings"]["auto_backup"], false);
     assert_eq!(
         h.messages.recv_timeout(Duration::from_secs(1)).unwrap(),
-        json!({"type":"settings","settings":{"auto_backup":false}})
+        json!({"type":"settings","settings":{"auto_backup":false,"auto_restart_hub":false}})
     );
     let edited = h.edit_assistant("antigravity", &cid, "Без копии");
     assert!(edited["result"]["backup"].is_null());
@@ -675,5 +675,99 @@ fn claude_notice_jobs_reject_stale_revisions_and_honor_backup_settings() {
     assert_eq!(
         h.rpc("backups_summary", "claude", json!({}))["total_count"],
         0
+    );
+}
+
+#[test]
+fn antigravity_live_unlock_rpc_flow_works_and_rejects_other_providers() {
+    let mut h = Harness::new();
+    let cid = h.seed("antigravity");
+
+    // Non-Antigravity providers reject unlock_db / relock_db / restart_hub.
+    for op in ["unlock_db", "relock_db", "restart_hub"] {
+        assert!(h
+            .service
+            .rpc(op, Some("codex"), json!({"cid": cid}))
+            .is_err());
+    }
+
+    let _holder = {
+        let p = h.service.provider("antigravity").unwrap();
+        let pdir = p.paths().root.join("presence");
+        fs::create_dir_all(&pdir).unwrap();
+        let holder = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(pdir.join(format!("{cid}.lock")))
+            .unwrap();
+        holder.lock().unwrap();
+        holder
+    };
+
+    let locked_entries = h.rpc("entries", "antigravity", json!({"cid": cid}));
+    assert_eq!(locked_entries["file_locked"], true);
+    assert_eq!(locked_entries["presence_locked"], true);
+    assert_eq!(locked_entries["live_unlocked"], false);
+    assert_eq!(locked_entries["can_unlock_db"], true);
+
+    // Write is blocked before unlock_db.
+    assert!(h
+        .service
+        .rpc(
+            "apply_edit",
+            Some("antigravity"),
+            json!({"cid": cid, "key": "1", "text": "blocked", "confirm": true})
+        )
+        .is_err());
+
+    // Unlock DB via RPC and verify conv_lock event + live edit + restore + relock.
+    let unlocked = h.rpc("unlock_db", "antigravity", json!({"cid": cid}));
+    assert_eq!(unlocked["ok"], true);
+    assert_eq!(unlocked["locked"], false);
+    assert_eq!(unlocked["live_unlocked"], true);
+
+    let ev = h.messages.recv_timeout(Duration::from_secs(2)).unwrap();
+    assert_eq!(ev["type"], "conv_lock");
+    assert_eq!(ev["provider"], "antigravity");
+    assert_eq!(ev["cid"], cid);
+    assert_eq!(ev["locked"], false);
+    assert_eq!(ev["live_unlocked"], true);
+
+    let edit_job = h.edit_assistant("antigravity", &cid, "Edited via live unlock RPC");
+    let backup_dir = edit_job["result"]["backup"].as_str().unwrap().to_owned();
+    let entries_after = h.rpc(
+        "entries",
+        "antigravity",
+        json!({"cid": cid, "include_tools": true}),
+    );
+    assert!(items(&entries_after)
+        .iter()
+        .any(|it| it["text"] == "Edited via live unlock RPC"));
+
+    h.job(
+        "restore",
+        "antigravity",
+        json!({"backup_dir": backup_dir, "confirm": true}),
+    );
+
+    let relocked = h.rpc("relock_db", "antigravity", json!({"cid": cid}));
+    assert_eq!(relocked["live_unlocked"], false);
+    assert_eq!(relocked["locked"], true);
+
+    // Enabling auto_restart_hub automatically unlocks presence-locked chats and persists across restarts.
+    let s = h.rpc("set_settings", "all", json!({"auto_restart_hub": true}));
+    assert_eq!(s["settings"]["auto_restart_hub"], true);
+    let after_auto = h.rpc("entries", "antigravity", json!({"cid": cid}));
+    assert_eq!(after_auto["file_locked"], false);
+    assert_eq!(after_auto["live_unlocked"], true);
+    assert_eq!(after_auto["auto_restart_hub"], true);
+    let auto_edit = h.edit_assistant("antigravity", &cid, "Edited with auto_restart_hub");
+    assert_eq!(auto_edit["state"], "done");
+    let reopened = Service::new(AppPaths::isolated(h.root.path()), Arc::new(|_| {})).unwrap();
+    assert_eq!(
+        reopened.rpc("get_settings", None, json!({})).unwrap()["settings"]["auto_restart_hub"],
+        true
     );
 }

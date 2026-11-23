@@ -2827,6 +2827,7 @@ code.inline {
   flex: none;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
   padding: 9px 24px;
   background: var(--bg-surface);
@@ -2838,9 +2839,19 @@ code.inline {
   width: 15px;
   height: 15px;
   color: var(--txt-3);
+  flex: none;
+}
+.running-banner.is-live-unlocked > .ico {
+  color: var(--accent);
 }
 .running-banner-txt {
   line-height: 1.35;
+}
+.running-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
 }
 
 .chat-wrap.app-locked .msg-actions .btn {

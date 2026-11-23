@@ -661,6 +661,7 @@ fn a_write_phase_callback_cannot_overwrite_a_newer_revision() {
                     .unwrap();
             }
         }),
+        ..OpContext::default()
     };
     let error = fixture
         .provider

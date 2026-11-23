@@ -201,10 +201,15 @@ impl Service {
     pub fn new(paths: AppPaths, emit: EventSink) -> Result<Arc<Self>> {
         fs::create_dir_all(&paths.data_dir)?;
         let settings_path = paths.data_dir.join("k1tty_settings.json");
-        let auto_backup = storage::read_json(&settings_path)
-            .ok()
+        let saved_settings = storage::read_json(&settings_path).ok();
+        let auto_backup = saved_settings
+            .as_ref()
             .and_then(|v| v["auto_backup"].as_bool())
             .unwrap_or(true);
+        let auto_restart_hub = saved_settings
+            .as_ref()
+            .and_then(|v| v["auto_restart_hub"].as_bool())
+            .unwrap_or(false);
         let mut providers: BTreeMap<String, Arc<dyn Provider>> = BTreeMap::new();
         for p in paths.providers {
             let id = p.id.clone();
@@ -217,6 +222,7 @@ impl Service {
                 "opencode" => Arc::new(crate::opencode::OpenCodeProvider::new(p)),
                 _ => bail!("Неизвестный провайдер: {id}"),
             };
+            instance.set_auto_restart_hub(auto_restart_hub);
             providers.insert(id, instance);
         }
         let locks = providers
@@ -226,7 +232,9 @@ impl Service {
         Ok(Arc::new(Self {
             providers,
             locks,
-            settings: Mutex::new(json!({"auto_backup":auto_backup})),
+            settings: Mutex::new(
+                json!({"auto_backup":auto_backup,"auto_restart_hub":auto_restart_hub}),
+            ),
             settings_path,
             emit,
             view: Mutex::new(None),
@@ -260,8 +268,10 @@ impl Service {
             .clone()
     }
     fn context(&self) -> OpContext {
+        let s = self.settings();
         OpContext {
-            auto_backup: self.settings()["auto_backup"].as_bool().unwrap_or(true),
+            auto_backup: s["auto_backup"].as_bool().unwrap_or(true),
+            auto_restart_hub: s["auto_restart_hub"].as_bool().unwrap_or(false),
             ..OpContext::default()
         }
     }
@@ -289,6 +299,13 @@ impl Service {
                 if let Some(v) = data["auto_backup"].as_bool() {
                     settings["auto_backup"] = json!(v);
                 }
+                let hub_changed = data["auto_restart_hub"].as_bool();
+                if let Some(v) = hub_changed {
+                    settings["auto_restart_hub"] = json!(v);
+                    for prov in self.providers.values() {
+                        prov.set_auto_restart_hub(v);
+                    }
+                }
                 storage::atomic_write(
                     &self.settings_path,
                     &serde_json::to_vec_pretty(&*settings)?,
@@ -296,6 +313,21 @@ impl Service {
                 let snap = settings.clone();
                 drop(settings);
                 (self.emit)(json!({"type":"settings","settings":snap}));
+                if hub_changed.is_some() {
+                    let view = self.view.lock().unwrap_or_else(|e| e.into_inner()).clone();
+                    if let Some((view_pid, view_cid)) = view {
+                        if let Ok(prov) = self.provider(&view_pid) {
+                            if let Ok(mut status) = prov.lock_status(Some(&view_cid)) {
+                                if let Some(obj) = status.as_object_mut() {
+                                    obj.insert("type".into(), json!("conv_lock"));
+                                    obj.insert("provider".into(), json!(view_pid));
+                                    obj.insert("cid".into(), json!(view_cid));
+                                    (self.emit)(status);
+                                }
+                            }
+                        }
+                    }
+                }
                 return Ok(json!({"settings":snap}));
             }
             "state" => {
@@ -498,6 +530,31 @@ impl Service {
         }
         if matches!(op, "add_system_notice" | "delete_system_notices") && pid != "claude" {
             bail!("Системные уведомления доступны только для диалогов Claude.");
+        }
+        if matches!(op, "unlock_db" | "relock_db" | "restart_hub") {
+            if !matches!(pid, "antigravity" | "antigravity_cli") {
+                bail!("Живой анлок БД поддерживается только для Antigravity.");
+            }
+            let _guard = self.locks[pid].lock().unwrap_or_else(|e| e.into_inner());
+            let res = p.call(op, &data, &self.context())?;
+            if let Some(cid) = data["cid"].as_str().filter(|s| !s.is_empty()) {
+                if let Ok(mut status) = p.lock_status(Some(cid)) {
+                    if let Some(obj) = status.as_object_mut() {
+                        obj.insert("type".into(), json!("conv_lock"));
+                        obj.insert("provider".into(), json!(pid));
+                        obj.insert("cid".into(), json!(cid));
+                        (self.emit)(status);
+                    }
+                }
+            }
+            if op == "restart_hub" {
+                if let Ok(st) = p.call("state", &json!({}), &self.context()) {
+                    let mut delta = Map::new();
+                    delta.insert(pid.into(), st);
+                    (self.emit)(json!({"type":"procs","providers":delta}));
+                }
+            }
+            return Ok(res);
         }
         if op == "convert_chat" {
             let cid = required(&data, "cid")?.to_owned();
@@ -737,8 +794,10 @@ impl Service {
         let shared = Arc::new(Mutex::new(job));
         let sink = self.emit.clone();
         let progress = shared.clone();
+        let base_ctx = self.context();
         let ctx = OpContext {
-            auto_backup: self.context().auto_backup,
+            auto_backup: base_ctx.auto_backup,
+            auto_restart_hub: base_ctx.auto_restart_hub,
             on_phase: Arc::new(move |phase| {
                 let mut j = progress.lock().unwrap_or_else(|e| e.into_inner());
                 j["phase"] = json!(phase);
@@ -761,9 +820,13 @@ impl Service {
                     .collect::<Vec<_>>();
                 work(&ctx)
             }));
+            let mut hub_restarted_provider: Option<String> = None;
             let mut job = shared.lock().unwrap_or_else(|e| e.into_inner());
             match outcome {
                 Ok(Ok(result)) => {
+                    if result["hub_restarted"].as_bool() == Some(true) {
+                        hub_restarted_provider = job["provider"].as_str().map(str::to_owned);
+                    }
                     job["state"] = json!("done");
                     job["phase"] = json!("done");
                     job["result"] = result;
@@ -779,6 +842,16 @@ impl Service {
             }
             job["ms"] = json!(started.elapsed().as_millis() as u64);
             (service.emit)(json!({"type":"job","job":*job}));
+            drop(job);
+            if let Some(pid) = hub_restarted_provider {
+                if let Ok(prov) = service.provider(&pid) {
+                    if let Ok(st) = prov.call("state", &json!({}), &service.context()) {
+                        let mut delta = Map::new();
+                        delta.insert(pid, st);
+                        (service.emit)(json!({"type":"procs","providers":delta}));
+                    }
+                }
+            }
             service.active_jobs.fetch_sub(1, Ordering::SeqCst);
         });
         Ok(json!({"job_id":id}))
@@ -910,12 +983,15 @@ impl Service {
                     if let Some(lock) = service.locks.get(&id) {
                         if let Ok(_guard) = lock.try_lock() {
                             if let Ok(p) = service.provider(&id) {
-                                if let Ok(reason) = p.probe_lock(Some(&cid)) {
-                                    let next = (id.clone(), cid.clone(), reason.clone());
+                                if let Ok(mut status) = p.lock_status(Some(&cid)) {
+                                    let next = (id.clone(), cid.clone(), status.clone());
                                     if previous_lock.as_ref() != Some(&next) {
-                                        (service.emit)(
-                                            json!({"type":"conv_lock","provider":id,"cid":cid,"locked":reason.is_some(),"reason":reason.unwrap_or_default()}),
-                                        );
+                                        if let Some(obj) = status.as_object_mut() {
+                                            obj.insert("type".into(), json!("conv_lock"));
+                                            obj.insert("provider".into(), json!(id));
+                                            obj.insert("cid".into(), json!(cid));
+                                            (service.emit)(status);
+                                        }
                                         previous_lock = Some(next);
                                     }
                                 }
