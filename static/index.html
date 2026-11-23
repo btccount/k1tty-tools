@@ -326,6 +326,14 @@
                 <input type="checkbox" role="switch" id="ovAutoBackupToggle" aria-labelledby="ovAutoBackupLabel" aria-describedby="ovAutoBackupHint" checked>
                 <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
               </label>
+              <label class="backup-setting" id="ovAutoRestartHubWrap">
+                <span class="backup-setting-copy">
+                  <span class="backup-setting-title" id="ovAutoRestartHubLabel" data-i18n="auto_restart_hub">Авто-рестарт Antigravity Hub</span>
+                  <span class="backup-setting-hint" id="ovAutoRestartHubHint" data-i18n="auto_restart_hub_hint">Авто-анлок БД и релоад Hub после правки</span>
+                </span>
+                <input type="checkbox" role="switch" id="ovAutoRestartHubToggle" aria-labelledby="ovAutoRestartHubLabel" aria-describedby="ovAutoRestartHubHint">
+                <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
+              </label>
               <div class="disk-split-wrap" id="ovDiskSplit"></div>
               <div class="ov-bk-grid" id="ovBkGrid"></div>
               <div class="ov-bk-actions">
@@ -375,6 +383,10 @@
             <button class="btn sm primary hidden" id="runningUnlockDbBtn" type="button">
               <svg class="ico"><use href="#i-unlock"/></svg>
               <span data-i18n="unlock_db_btn">Разблокировать БД</span>
+            </button>
+            <button class="btn sm hidden" id="runningAutoHubBtn" type="button">
+              <svg class="ico"><use href="#i-refresh"/></svg>
+              <span id="runningAutoHubLabel" data-i18n="auto_hub_on_btn">Авто-рестарт Hub</span>
             </button>
             <button class="btn sm hidden" id="runningRestartHubBtn" type="button">
               <svg class="ico"><use href="#i-refresh"/></svg>

@@ -14,6 +14,7 @@ pub struct ProviderPaths {
 #[derive(Clone)]
 pub struct OpContext {
     pub auto_backup: bool,
+    pub auto_restart_hub: bool,
     pub on_phase: Arc<dyn Fn(&str) + Send + Sync>,
 }
 
@@ -21,6 +22,7 @@ impl Default for OpContext {
     fn default() -> Self {
         Self {
             auto_backup: true,
+            auto_restart_hub: false,
             on_phase: Arc::new(|_| {}),
         }
     }
@@ -45,6 +47,7 @@ pub trait Provider: Send + Sync {
             "reason": reason.unwrap_or_default(),
         }))
     }
+    fn set_auto_restart_hub(&self, _enabled: bool) {}
     fn assert_writable(&self, cid: Option<&str>) -> Result<()> {
         if let Some(reason) = self.probe_lock(cid)? {
             bail!(reason);

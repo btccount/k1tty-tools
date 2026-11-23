@@ -138,9 +138,17 @@ const I18N = {
     pill_running: "{name} открыт",
     pill_blocked: "{name} занят",
     pill_live_unlocked: "Live Unlock",
+    pill_auto_hub: "Auto Hub",
+    auto_restart_hub: "Авто-рестарт Antigravity Hub",
+    auto_restart_hub_hint: "Авто-анлок БД и релоад Hub после правки",
     running_guard_banner: "Файл диалога занят {name} · Закройте этот диалог или приложение для редактирования",
-    running_guard_unlock_banner: "Файл диалога занят {name} · Можно разблокировать БД для WAL-правки или перезапустить Hub",
+    running_guard_unlock_banner: "Файл диалога занят {name} · Можно разблокировать БД для WAL-правки или включить авто-рестарт Hub",
     live_unlocked_banner: "Live Unlock активен · WAL-запись в БД {name} открыта. После правки переоткройте диалог или перезапустите Hub",
+    auto_hub_banner: "Авто-рестарт Hub включён · БД {name} разблокирована, после сохранения language_server перезапустится сам",
+    auto_hub_on_btn: "Авто-рестарт Hub",
+    auto_hub_off_btn: "Откл. авто-рестарт",
+    toast_autohub_on: "Авто-рестарт Antigravity Hub включён (авто-анлок БД + релоад после правки)",
+    toast_autohub_off: "Авто-рестарт Antigravity Hub выключен",
     unlock_db_btn: "Разблокировать БД",
     relock_db_btn: "Вернуть защиту",
     restart_hub_btn: "Перезапустить Hub",
@@ -472,9 +480,17 @@ const I18N = {
     pill_running: "{name} відкрито",
     pill_blocked: "{name} зайнятий",
     pill_live_unlocked: "Live Unlock",
+    pill_auto_hub: "Auto Hub",
+    auto_restart_hub: "Авто-рестарт Antigravity Hub",
+    auto_restart_hub_hint: "Авто-анлок БД і релоад Hub після правки",
     running_guard_banner: "Файл діалогу зайнятий {name} · Закрийте цей діалог або застосунок для редагування",
-    running_guard_unlock_banner: "Файл діалогу зайнятий {name} · Можна розблокувати БД для WAL-правки або перезапустити Hub",
+    running_guard_unlock_banner: "Файл діалогу зайнятий {name} · Можна розблокувати БД для WAL-правки або увімкнути авто-рестарт Hub",
     live_unlocked_banner: "Live Unlock активний · WAL-запис у БД {name} відкрито. Після правки перевідкрийте діалог або перезапустіть Hub",
+    auto_hub_banner: "Авто-рестарт Hub увімкнено · БД {name} розблоковано, після збереження language_server перезапуститься сам",
+    auto_hub_on_btn: "Авто-рестарт Hub",
+    auto_hub_off_btn: "Вимк. авто-рестарт",
+    toast_autohub_on: "Авто-рестарт Antigravity Hub увімкнено (авто-анлок БД + релоад після правки)",
+    toast_autohub_off: "Авто-рестарт Antigravity Hub вимкнено",
     unlock_db_btn: "Розблокувати БД",
     relock_db_btn: "Повернути захист",
     restart_hub_btn: "Перезапустити Hub",
@@ -806,9 +822,17 @@ const I18N = {
     pill_running: "{name} open",
     pill_blocked: "{name} locked",
     pill_live_unlocked: "Live Unlock",
+    pill_auto_hub: "Auto Hub",
+    auto_restart_hub: "Auto-restart Antigravity Hub",
+    auto_restart_hub_hint: "Auto-unlock DB and reload Hub after saving",
     running_guard_banner: "Dialogue file is in use by {name} · Close the dialogue or app to edit",
-    running_guard_unlock_banner: "Dialogue file is in use by {name} · Unlock DB for WAL editing or restart the Hub",
+    running_guard_unlock_banner: "Dialogue file is in use by {name} · Unlock DB for WAL editing or enable auto-restart Hub",
     live_unlocked_banner: "Live Unlock active · WAL writes to {name} DB enabled. Reopen the chat or restart Hub to reload changes",
+    auto_hub_banner: "Auto-restart Hub enabled · {name} DB unlocked, language_server will reload automatically after saving",
+    auto_hub_on_btn: "Auto-restart Hub",
+    auto_hub_off_btn: "Disable auto-restart",
+    toast_autohub_on: "Antigravity Hub auto-restart enabled (auto-unlock DB + reload after edit)",
+    toast_autohub_off: "Antigravity Hub auto-restart disabled",
     unlock_db_btn: "Unlock DB",
     relock_db_btn: "Relock",
     restart_hub_btn: "Restart Hub",
@@ -1268,6 +1292,44 @@ async function setAutoBackup(next) {
   }
 }
 
+let autoRestartHubPending = false;
+function applyAutoRestartHubUI() {
+  const on = STATE.settings?.auto_restart_hub === true;
+  const inp = $("#ovAutoRestartHubToggle");
+  const wrap = $("#ovAutoRestartHubWrap");
+  if (inp) {
+    inp.checked = on;
+    inp.disabled = autoRestartHubPending;
+  }
+  if (wrap) {
+    wrap.classList.toggle("is-on", on);
+    wrap.setAttribute("aria-busy", String(autoRestartHubPending));
+  }
+}
+
+async function setAutoRestartHub(next) {
+  if (autoRestartHubPending) { applyAutoRestartHubUI(); return; }
+  const val = !!next;
+  const previous = STATE.settings?.auto_restart_hub === true;
+  if (val === previous) { applyAutoRestartHubUI(); return; }
+  autoRestartHubPending = true;
+  STATE.settings = { ...(STATE.settings || {}), auto_restart_hub: val };
+  applyAutoRestartHubUI();
+  refreshStatusBadge();
+  try {
+    const r = await rpc("set_settings", "all", { auto_restart_hub: val });
+    if (r.settings) STATE.settings = r.settings;
+    toast(t(val ? "toast_autohub_on" : "toast_autohub_off"), "ok");
+  } catch (e) {
+    STATE.settings = { ...(STATE.settings || {}), auto_restart_hub: previous };
+    toast(e.message, "err");
+  } finally {
+    autoRestartHubPending = false;
+    applyAutoRestartHubUI();
+    refreshStatusBadge();
+  }
+}
+
 function applyWinterUI() {
   const on = window.K1ttyWinter ? window.K1ttyWinter.isEnabled() : document.body.classList.contains("winter-theme");
   const btn = $("#winterBtn");
@@ -1307,6 +1369,7 @@ function applyI18n() {
   applyPrivacyUI();
   applyWinterUI();
   applyAutoBackupUI();
+  applyAutoRestartHubUI();
   if (!STATE.active) {
     $("#threadTitle").textContent = t("overview");
     $("#threadTitle").classList.remove("is-thread");
@@ -1361,6 +1424,8 @@ function onNativeMessage(m) {
   if (m.type === "settings" && m.settings) {
     STATE.settings = m.settings;
     applyAutoBackupUI();
+    applyAutoRestartHubUI();
+    refreshStatusBadge();
     return;
   }
   if (m.type === "hello") {
@@ -2473,6 +2538,7 @@ $("#ovBackupsBtn").onclick = () => openBackups("all", null);
 $("#ovBkExploreBtn")?.addEventListener("click", () => openBackups("all", null));
 $("#ovBkCleanBtn")?.addEventListener("click", () => openDeleteAllBackups());
 $("#ovAutoBackupToggle")?.addEventListener("change", (ev) => setAutoBackup(ev.target.checked));
+$("#ovAutoRestartHubToggle")?.addEventListener("change", (ev) => setAutoRestartHub(ev.target.checked));
 $("#bkAutoBackupToggle")?.addEventListener("change", (ev) => setAutoBackup(ev.target.checked));
 $("#ovStats")?.addEventListener("click", (ev) => {
   if (ev.target.closest("[data-open-backups]")) openBackups("all", null);
@@ -2811,6 +2877,7 @@ function renderOverview() {
     bkCleanBtn.classList.toggle("hidden", bkTotalCount <= 0);
   }
   applyAutoBackupUI();
+  applyAutoRestartHubUI();
 
   if (splitEl) {
     const combined = totalBytes + bkTotalBytes;
@@ -3216,6 +3283,8 @@ function syncRunningGuard() {
   const iconEl = $("#runningGuardIcon");
   const actionsEl = $("#runningGuardActions");
   const unlockBtn = $("#runningUnlockDbBtn");
+  const autoHubBtn = $("#runningAutoHubBtn");
+  const autoHubLbl = $("#runningAutoHubLabel");
   const restartBtn = $("#runningRestartHubBtn");
   const relockBtn = $("#runningRelockDbBtn");
   if (!wrap || !banner || !txtEl) return;
@@ -3228,10 +3297,15 @@ function syncRunningGuard() {
   }
   const pid = STATE.active.provider;
   const locked = isConvLocked(pid, STATE.active.id);
-  const canUnlock = !!(STATE.active.canUnlockDb || pid === "antigravity" || pid === "antigravity_cli");
-  const canRestart = !!(STATE.active.canRestartHub || pid === "antigravity" || pid === "antigravity_cli");
+  const isAg = pid === "antigravity" || pid === "antigravity_cli";
+  const canUnlock = !!(STATE.active.canUnlockDb || isAg);
+  const canRestart = !!(STATE.active.canRestartHub || isAg);
+  const autoHubOn = isAg && STATE.settings?.auto_restart_hub === true;
+  const provRunning = !!(STATE.providers[pid]?.running?.length);
   const liveUnlockedActive = !locked && !!STATE.active.liveUnlocked && !!STATE.active.presenceLocked;
+  const autoHubActive = !locked && autoHubOn && (provRunning || !!STATE.active.presenceLocked);
   const pname = PROV[pid]?.name || pid;
+  const busy = dbUnlockActionPending || autoRestartHubPending;
 
   wrap.classList.toggle("app-locked", locked);
   if (locked) {
@@ -3241,11 +3315,33 @@ function syncRunningGuard() {
     if (actionsEl) actionsEl.classList.toggle("hidden", !canUnlock && !canRestart);
     if (unlockBtn) {
       unlockBtn.classList.toggle("hidden", !canUnlock);
-      unlockBtn.disabled = dbUnlockActionPending;
+      unlockBtn.disabled = busy;
+    }
+    if (autoHubBtn) {
+      autoHubBtn.classList.toggle("hidden", !isAg);
+      autoHubBtn.disabled = busy;
+      if (autoHubLbl) autoHubLbl.textContent = t("auto_hub_on_btn");
     }
     if (restartBtn) {
       restartBtn.classList.toggle("hidden", !canRestart);
-      restartBtn.disabled = dbUnlockActionPending;
+      restartBtn.disabled = busy;
+    }
+    if (relockBtn) relockBtn.classList.add("hidden");
+  } else if (autoHubActive) {
+    banner.classList.remove("hidden");
+    banner.classList.add("is-live-unlocked");
+    if (iconEl) iconEl.innerHTML = '<use href="#i-refresh"/>';
+    txtEl.textContent = t("auto_hub_banner", { name: pname });
+    if (actionsEl) actionsEl.classList.remove("hidden");
+    if (unlockBtn) unlockBtn.classList.add("hidden");
+    if (autoHubBtn) {
+      autoHubBtn.classList.remove("hidden");
+      autoHubBtn.disabled = busy;
+      if (autoHubLbl) autoHubLbl.textContent = t("auto_hub_off_btn");
+    }
+    if (restartBtn) {
+      restartBtn.classList.toggle("hidden", !canRestart);
+      restartBtn.disabled = busy;
     }
     if (relockBtn) relockBtn.classList.add("hidden");
   } else if (liveUnlockedActive) {
@@ -3255,13 +3351,18 @@ function syncRunningGuard() {
     txtEl.textContent = t("live_unlocked_banner", { name: pname });
     if (actionsEl) actionsEl.classList.remove("hidden");
     if (unlockBtn) unlockBtn.classList.add("hidden");
+    if (autoHubBtn) {
+      autoHubBtn.classList.toggle("hidden", !isAg);
+      autoHubBtn.disabled = busy;
+      if (autoHubLbl) autoHubLbl.textContent = t("auto_hub_on_btn");
+    }
     if (restartBtn) {
       restartBtn.classList.toggle("hidden", !canRestart);
-      restartBtn.disabled = dbUnlockActionPending;
+      restartBtn.disabled = busy;
     }
     if (relockBtn) {
       relockBtn.classList.remove("hidden");
-      relockBtn.disabled = dbUnlockActionPending;
+      relockBtn.disabled = busy;
     }
   } else {
     banner.classList.add("hidden");
@@ -3330,6 +3431,7 @@ async function runLiveUnlockOp(op) {
 }
 
 $("#runningUnlockDbBtn")?.addEventListener("click", () => runLiveUnlockOp("unlock_db"));
+$("#runningAutoHubBtn")?.addEventListener("click", () => setAutoRestartHub(STATE.settings?.auto_restart_hub !== true));
 $("#runningRelockDbBtn")?.addEventListener("click", () => runLiveUnlockOp("relock_db"));
 $("#runningRestartHubBtn")?.addEventListener("click", () => runLiveUnlockOp("restart_hub"));
 
@@ -3374,13 +3476,21 @@ function updateThreadStatus(provId, writable) {
   let show = false, cls = "", iconName = "app-window", pillTxt = "", msg = "";
   const pname = PROV[provId]?.name || st.name || provId;
   const activeFileLocked = !!(STATE.active && !STATE.active.readonlyBackup && STATE.active.provider === provId && STATE.active.fileLocked);
+  const isAg = provId === "antigravity" || provId === "antigravity_cli";
+  const activeAutoHub = !!(isAg && STATE.active && !STATE.active.readonlyBackup && STATE.active.provider === provId && !activeFileLocked && STATE.settings?.auto_restart_hub === true && ((st.running && st.running.length) || STATE.active.presenceLocked));
   const activeLiveUnlocked = !!(STATE.active && !STATE.active.readonlyBackup && STATE.active.provider === provId && !activeFileLocked && STATE.active.liveUnlocked && STATE.active.presenceLocked);
-  if (activeFileLocked || (st.blocked && !activeLiveUnlocked)) {
+  if (activeFileLocked || (st.blocked && !activeLiveUnlocked && !activeAutoHub)) {
     show = true;
     cls = "err";
     iconName = "lock";
     pillTxt = t("pill_blocked", { name: pname });
     msg = t("toast_close_app_first", { name: pname });
+  } else if (activeAutoHub) {
+    show = true;
+    cls = "running";
+    iconName = "refresh";
+    pillTxt = t("pill_auto_hub");
+    msg = t("auto_hub_banner", { name: pname });
   } else if (activeLiveUnlocked) {
     show = true;
     cls = "running";
@@ -5614,6 +5724,7 @@ async function refreshAll(force = false) {
     STATE.allConvs = cvRes.convs || [];
     if (bkRes) STATE.backupsSummary = bkRes;
     applyAutoBackupUI();
+    applyAutoRestartHubUI();
     renderSidebar();
     if (!STATE.active) renderOverview();
     refreshStatusBadge();

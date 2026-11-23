@@ -726,7 +726,7 @@ fn is_matching_ag_hub(
     }
 }
 
-pub fn stop_antigravity_hubs(provider_id: &str, daemon_dir: &Path) -> Vec<u32> {
+pub fn stop_antigravity_hubs(provider_id: &str, daemon_dir: &Path, scan_global: bool) -> Vec<u32> {
     if !matches!(provider_id, "antigravity" | "antigravity_cli") {
         return Vec::new();
     }
@@ -752,6 +752,10 @@ pub fn stop_antigravity_hubs(provider_id: &str, daemon_dir: &Path) -> Vec<u32> {
         }
     }
 
+    if !scan_global && daemon_pids.is_empty() {
+        return Vec::new();
+    }
+
     let mut system = System::new();
     system.refresh_processes_specifics(
         ProcessesToUpdate::All,
@@ -768,6 +772,10 @@ pub fn stop_antigravity_hubs(provider_id: &str, daemon_dir: &Path) -> Vec<u32> {
         if uid == self_pid {
             continue;
         }
+        let from_daemon = daemon_pids.contains(&uid);
+        if !scan_global && !from_daemon {
+            continue;
+        }
         let name = proc_info.name().to_string_lossy().to_lowercase();
         let exe = proc_info
             .exe()
@@ -780,7 +788,6 @@ pub fn stop_antigravity_hubs(provider_id: &str, daemon_dir: &Path) -> Vec<u32> {
             .collect::<Vec<_>>()
             .join(" ")
             .to_lowercase();
-        let from_daemon = daemon_pids.contains(&uid);
         if is_matching_ag_hub(provider_id, &name, &exe, &cmd, from_daemon) {
             let sent = match proc_info.kill_with(Signal::Term) {
                 Some(ok) => ok,

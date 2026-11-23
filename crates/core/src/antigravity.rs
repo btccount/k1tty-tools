@@ -12,7 +12,10 @@ use std::{
     fs::{self, File, FileTimes},
     io::Write,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
     time::{Duration, UNIX_EPOCH},
 };
 
@@ -21,6 +24,7 @@ pub struct AntigravityProvider {
     turns_cache: Mutex<BTreeMap<String, (Vec<(u128, u64)>, Arc<Vec<Value>>, usize)>>,
     count_cache: Mutex<BTreeMap<String, (Vec<(u128, u64)>, Option<i64>)>>,
     live_unlocked: Mutex<BTreeSet<String>>,
+    auto_restart_hub: AtomicBool,
 }
 
 fn txt<'a>(value: &'a Value, key: &str) -> &'a str {
@@ -447,6 +451,7 @@ impl AntigravityProvider {
             turns_cache: Mutex::new(BTreeMap::new()),
             count_cache: Mutex::new(BTreeMap::new()),
             live_unlocked: Mutex::new(BTreeSet::new()),
+            auto_restart_hub: AtomicBool::new(false),
         }
     }
     fn invalidate(&self, cid: Option<&str>) {
@@ -539,15 +544,74 @@ impl AntigravityProvider {
             .unwrap_or_else(|e| e.into_inner())
             .contains(cid)
     }
+    fn is_auto_restart_hub(&self) -> bool {
+        self.auto_restart_hub.load(Ordering::Relaxed)
+    }
+    fn is_effective_live_unlocked(&self, cid: &str) -> bool {
+        self.is_auto_restart_hub() || self.is_live_unlocked(cid)
+    }
+    fn is_isolated_root(&self) -> bool {
+        if self.test_mode() {
+            return true;
+        }
+        let tmp = std::env::temp_dir();
+        if self.paths.root.starts_with(&tmp) {
+            return true;
+        }
+        if let (Ok(root_canon), Ok(tmp_canon)) =
+            (self.paths.root.canonicalize(), tmp.canonicalize())
+        {
+            if root_canon.starts_with(&tmp_canon) {
+                return true;
+            }
+        }
+        false
+    }
     fn is_presence_locked(&self, cid: &str) -> bool {
         self.presence_guard(cid).is_err()
     }
     fn presence_guard_for_write(&self, cid: &str) -> Result<(Option<File>, bool)> {
         match self.presence_guard(cid) {
             Ok(guard) => Ok((guard, false)),
-            Err(_err) if self.is_live_unlocked(cid) => Ok((None, true)),
+            Err(_err) if self.is_effective_live_unlocked(cid) => Ok((None, true)),
             Err(err) => Err(err),
         }
+    }
+    fn maybe_auto_restart_hub(
+        &self,
+        cid: Option<&str>,
+        ctx: &OpContext,
+        warns: &mut Vec<String>,
+    ) -> (bool, Vec<u32>) {
+        if !ctx.auto_restart_hub {
+            return (false, Vec::new());
+        }
+        let Ok(res) = self.restart_hub(cid) else {
+            return (false, Vec::new());
+        };
+        let pids: Vec<u32> = res["pids"]
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_u64().and_then(|n| u32::try_from(n).ok()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if pids.is_empty() {
+            return (false, Vec::new());
+        }
+        warns
+            .retain(|w| !w.contains("переоткройте диалог") && !w.contains("после его перезапуска"));
+        let pid_str = pids
+            .iter()
+            .map(u32::to_string)
+            .collect::<Vec<_>>()
+            .join(", ");
+        warns.push(format!(
+            "Авто-рестарт Hub: перезапущен language_server (PID: {pid_str}). {} перечитает обновлённую БД.",
+            self.paths.name
+        ));
+        (true, pids)
     }
     fn unlock_db(&self, cid: &str) -> Result<Value> {
         safe_id(cid)?;
@@ -611,7 +675,11 @@ impl AntigravityProvider {
             safe_id(cid)?;
         }
         let daemon_dir = self.paths.root.join("daemon");
-        let pids = crate::process::stop_antigravity_hubs(&self.paths.id, &daemon_dir);
+        let pids = crate::process::stop_antigravity_hubs(
+            &self.paths.id,
+            &daemon_dir,
+            !self.is_isolated_root(),
+        );
         if !pids.is_empty() {
             for _ in 0..30 {
                 let alive = crate::process::any_pid_alive(&pids);
@@ -977,6 +1045,7 @@ impl AntigravityProvider {
             "lock_reason": status["reason"],
             "live_unlocked": status["live_unlocked"],
             "presence_locked": status["presence_locked"],
+            "auto_restart_hub": status["auto_restart_hub"],
             "can_unlock_db": status["can_unlock_db"],
             "can_restart_hub": status["can_restart_hub"],
         }))
@@ -1174,7 +1243,7 @@ impl AntigravityProvider {
             !text.trim().is_empty(),
             "Пустой текст, сохранение не выполнено."
         );
-        let (guard, warns) = self.write_gate(cid)?;
+        let (guard, mut warns) = self.write_gate(cid)?;
         let (stype, _) = self.step(cid, idx)?;
         let text = if stype == 14 || stype == 15 {
             text.trim()
@@ -1204,8 +1273,11 @@ impl AntigravityProvider {
                 return Err(error);
             }
         };
+        let (hub_restarted, hub_pids) = self.maybe_auto_restart_hub(Some(cid), ctx, &mut warns);
         rep["backup"] = json!(backup);
         rep["warns"] = json!(warns);
+        rep["hub_restarted"] = json!(hub_restarted);
+        rep["hub_pids"] = json!(hub_pids);
         self.invalidate(Some(cid));
         ctx.phase("done");
         Ok(rep)
@@ -1894,7 +1966,7 @@ impl AntigravityProvider {
     }
     fn apply_cut(&self, cid: &str, idx: i64, mode: &str, ctx: &OpContext) -> Result<Value> {
         let keep = if mode == "tail" { idx - 1 } else { idx };
-        let (guard, warns) = self.write_gate(cid)?;
+        let (guard, mut warns) = self.write_gate(cid)?;
         let original = self.read_history(cid);
         let backup = if ctx.auto_backup {
             ctx.phase("backup");
@@ -1936,7 +2008,10 @@ impl AntigravityProvider {
         } else {
             json!([])
         };
+        let (hub_restarted, hub_pids) = self.maybe_auto_restart_hub(Some(cid), ctx, &mut warns);
         rep["warns"] = json!(warns);
+        rep["hub_restarted"] = json!(hub_restarted);
+        rep["hub_pids"] = json!(hub_pids);
         self.invalidate(Some(cid));
         ctx.phase("done");
         Ok(rep)
@@ -2006,7 +2081,7 @@ impl AntigravityProvider {
         leaks
     }
     fn delete_conv(&self, cid: &str, ctx: &OpContext) -> Result<Value> {
-        let (guard, warns) = self.write_gate(cid)?;
+        let (guard, mut warns) = self.write_gate(cid)?;
         let backup = if ctx.auto_backup {
             ctx.phase("backup");
             Some(self.full_backup(cid, "delete_conv")?)
@@ -2072,9 +2147,12 @@ impl AntigravityProvider {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .remove(cid);
+        let (hub_restarted, hub_pids) = self.maybe_auto_restart_hub(Some(cid), ctx, &mut warns);
         self.invalidate(Some(cid));
         ctx.phase("done");
-        Ok(json!({"deleted":cid,"provider":self.paths.id,"backup":backup,"warns":warns}))
+        Ok(
+            json!({"deleted":cid,"provider":self.paths.id,"backup":backup,"warns":warns,"hub_restarted":hub_restarted,"hub_pids":hub_pids}),
+        )
     }
 }
 
@@ -2492,7 +2570,7 @@ impl Provider for AntigravityProvider {
     fn probe_lock(&self, cid: Option<&str>) -> Result<Option<String>> {
         if let Some(cid) = cid {
             safe_id(cid)?;
-            if !self.is_live_unlocked(cid) {
+            if !self.is_effective_live_unlocked(cid) {
                 if let Err(error) = self.presence_guard(cid) {
                     return Ok(Some(format!(
                         "Файл диалога {} занят ({error}). Закройте {} и повторите.",
@@ -2517,16 +2595,20 @@ impl Provider for AntigravityProvider {
     }
     fn lock_status(&self, cid: Option<&str>) -> Result<Value> {
         let reason = self.probe_lock(cid)?;
-        let live_unlocked = cid.is_some_and(|c| self.is_live_unlocked(c));
+        let live_unlocked = cid.is_some_and(|c| self.is_effective_live_unlocked(c));
         let presence_locked = cid.is_some_and(|c| self.is_presence_locked(c));
         Ok(json!({
             "locked": reason.is_some(),
             "reason": reason.unwrap_or_default(),
             "live_unlocked": live_unlocked,
             "presence_locked": presence_locked,
+            "auto_restart_hub": self.is_auto_restart_hub(),
             "can_unlock_db": true,
             "can_restart_hub": true,
         }))
+    }
+    fn set_auto_restart_hub(&self, enabled: bool) {
+        self.auto_restart_hub.store(enabled, Ordering::Relaxed);
     }
     fn call(&self, op: &str, d: &Value, ctx: &OpContext) -> Result<Value> {
         match op {
@@ -2543,8 +2625,14 @@ impl Provider for AntigravityProvider {
                 let path = Path::new(required(d, "backup_dir")?);
                 ctx.phase("restore");
                 self.restore(path)?;
+                let mut warns = Vec::new();
+                let meta = read_value(&path.join("backup.meta.json"));
+                let cid = meta["conversation_id"].as_str();
+                let (hub_restarted, hub_pids) = self.maybe_auto_restart_hub(cid, ctx, &mut warns);
                 ctx.phase("done");
-                Ok(json!({"restored":path,"provider":self.paths.id}))
+                Ok(
+                    json!({"restored":path,"provider":self.paths.id,"warns":warns,"hub_restarted":hub_restarted,"hub_pids":hub_pids}),
+                )
             }
             "restart_hub" => {
                 let cid = d["cid"].as_str().filter(|s| !s.is_empty());

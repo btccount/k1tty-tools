@@ -341,7 +341,7 @@ fn settings_persist_and_control_backup_creation() {
     assert_eq!(settings["settings"]["auto_backup"], false);
     assert_eq!(
         h.messages.recv_timeout(Duration::from_secs(1)).unwrap(),
-        json!({"type":"settings","settings":{"auto_backup":false}})
+        json!({"type":"settings","settings":{"auto_backup":false,"auto_restart_hub":false}})
     );
     let edited = h.edit_assistant("antigravity", &cid, "Без копии");
     assert!(edited["result"]["backup"].is_null());
@@ -755,4 +755,19 @@ fn antigravity_live_unlock_rpc_flow_works_and_rejects_other_providers() {
     assert_eq!(relocked["live_unlocked"], false);
     #[cfg(unix)]
     assert_eq!(relocked["locked"], true);
+
+    // Enabling auto_restart_hub automatically unlocks presence-locked chats and persists across restarts.
+    let s = h.rpc("set_settings", "all", json!({"auto_restart_hub": true}));
+    assert_eq!(s["settings"]["auto_restart_hub"], true);
+    let after_auto = h.rpc("entries", "antigravity", json!({"cid": cid}));
+    assert_eq!(after_auto["file_locked"], false);
+    assert_eq!(after_auto["live_unlocked"], true);
+    assert_eq!(after_auto["auto_restart_hub"], true);
+    let auto_edit = h.edit_assistant("antigravity", &cid, "Edited with auto_restart_hub");
+    assert_eq!(auto_edit["state"], "done");
+    let reopened = Service::new(AppPaths::isolated(h.root.path()), Arc::new(|_| {})).unwrap();
+    assert_eq!(
+        reopened.rpc("get_settings", None, json!({})).unwrap()["settings"]["auto_restart_hub"],
+        true
+    );
 }
