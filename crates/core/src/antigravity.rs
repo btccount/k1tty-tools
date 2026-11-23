@@ -20,6 +20,7 @@ pub struct AntigravityProvider {
     paths: ProviderPaths,
     turns_cache: Mutex<BTreeMap<String, (Vec<(u128, u64)>, Arc<Vec<Value>>, usize)>>,
     count_cache: Mutex<BTreeMap<String, (Vec<(u128, u64)>, Option<i64>)>>,
+    live_unlocked: Mutex<BTreeSet<String>>,
 }
 
 fn txt<'a>(value: &'a Value, key: &str) -> &'a str {
@@ -73,7 +74,7 @@ fn rw(db: &Path) -> Result<Connection> {
     con.busy_timeout(Duration::from_secs(30))?;
     Ok(con)
 }
-fn db_probe(db: &Path) -> Result<()> {
+fn db_probe_with_timeout(db: &Path, timeout: Duration) -> Result<()> {
     if !db.is_file() {
         return Ok(());
     }
@@ -81,9 +82,15 @@ fn db_probe(db: &Path) -> Result<()> {
         db,
         OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )?;
-    con.busy_timeout(Duration::from_millis(120))?;
+    con.busy_timeout(timeout)?;
     con.execute_batch("BEGIN IMMEDIATE; ROLLBACK;")?;
     Ok(())
+}
+fn db_probe(db: &Path) -> Result<()> {
+    db_probe_with_timeout(db, Duration::from_millis(120))
+}
+fn wal_checkpoint_passive(con: &Connection) {
+    let _ = con.execute_batch("PRAGMA wal_checkpoint(PASSIVE);");
 }
 fn sql_bytes(v: &SqlValue) -> Vec<u8> {
     match v {
@@ -208,6 +215,25 @@ fn copy_db(src: &Path, dst: &Path) -> Result<()> {
     }
     temp.persist(dst).map_err(|e| e.error)?;
     preserve_times(src, dst)?;
+    Ok(())
+}
+fn restore_db_safe(src: &Path, dst: &Path) -> Result<()> {
+    if !dst.is_file() {
+        copy_db(src, dst)?;
+        if let Ok(con) = rw(dst) {
+            let _ = con.execute_batch("PRAGMA journal_mode=WAL;");
+        }
+        return Ok(());
+    }
+    let src_con = ro(src)?;
+    let mut dst_con = rw(dst)?;
+    {
+        let backup = rusqlite::backup::Backup::new(&src_con, &mut dst_con)?;
+        backup.run_to_completion(128, Duration::from_millis(5), None)?;
+    }
+    let check: String = dst_con.query_row("PRAGMA quick_check", [], |r| r.get(0))?;
+    ensure!(check == "ok", "quick_check после восстановления: {check}");
+    wal_checkpoint_passive(&dst_con);
     Ok(())
 }
 fn read_lines(path: &Path) -> Vec<String> {
@@ -420,6 +446,7 @@ impl AntigravityProvider {
             paths,
             turns_cache: Mutex::new(BTreeMap::new()),
             count_cache: Mutex::new(BTreeMap::new()),
+            live_unlocked: Mutex::new(BTreeSet::new()),
         }
     }
     fn invalidate(&self, cid: Option<&str>) {
@@ -506,19 +533,143 @@ impl AntigravityProvider {
         }
         Ok(None)
     }
-    fn write_gate(&self, cid: &str) -> Result<(Option<File>, Vec<String>)> {
-        let guard = self.presence_guard(cid)?;
+    fn is_live_unlocked(&self, cid: &str) -> bool {
+        self.live_unlocked
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains(cid)
+    }
+    fn is_presence_locked(&self, cid: &str) -> bool {
+        self.presence_guard(cid).is_err()
+    }
+    fn presence_guard_for_write(&self, cid: &str) -> Result<(Option<File>, bool)> {
+        match self.presence_guard(cid) {
+            Ok(guard) => Ok((guard, false)),
+            Err(_err) if self.is_live_unlocked(cid) => Ok((None, true)),
+            Err(err) => Err(err),
+        }
+    }
+    fn unlock_db(&self, cid: &str) -> Result<Value> {
+        safe_id(cid)?;
         ensure!(self.db(cid).is_file(), "Диалог {cid} не найден.");
-        db_probe(&self.db(cid)).with_context(|| {
+        db_probe_with_timeout(&self.db(cid), Duration::from_millis(800)).with_context(|| {
+            format!(
+                "SQLite-база {} сейчас физически занята. Подождите секунду или перезапустите Hub.",
+                self.paths.name
+            )
+        })?;
+        db_probe_with_timeout(&self.summaries(), Duration::from_millis(800)).with_context(
+            || {
+                format!(
+                "База сводок {} сейчас физически занята. Подождите секунду или перезапустите Hub.",
+                self.paths.name
+            )
+            },
+        )?;
+        self.live_unlocked
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(cid.to_owned());
+        let presence_locked = self.is_presence_locked(cid);
+        Ok(json!({
+            "ok": true,
+            "provider": self.paths.id,
+            "cid": cid,
+            "locked": false,
+            "file_locked": false,
+            "reason": "",
+            "lock_reason": "",
+            "live_unlocked": true,
+            "presence_locked": presence_locked,
+            "can_unlock_db": true,
+            "can_restart_hub": true,
+        }))
+    }
+    fn relock_db(&self, cid: &str) -> Result<Value> {
+        safe_id(cid)?;
+        self.live_unlocked
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(cid);
+        let status = self.lock_status(Some(cid))?;
+        Ok(json!({
+            "ok": true,
+            "provider": self.paths.id,
+            "cid": cid,
+            "locked": status["locked"],
+            "file_locked": status["locked"],
+            "reason": status["reason"],
+            "lock_reason": status["reason"],
+            "live_unlocked": status["live_unlocked"],
+            "presence_locked": status["presence_locked"],
+            "can_unlock_db": true,
+            "can_restart_hub": true,
+        }))
+    }
+    fn restart_hub(&self, cid: Option<&str>) -> Result<Value> {
+        if let Some(cid) = cid {
+            safe_id(cid)?;
+        }
+        let daemon_dir = self.paths.root.join("daemon");
+        let pids = crate::process::stop_antigravity_hubs(&self.paths.id, &daemon_dir);
+        if !pids.is_empty() {
+            for _ in 0..30 {
+                let alive = crate::process::any_pid_alive(&pids);
+                let pres = cid.is_some_and(|c| self.is_presence_locked(c));
+                if !alive && !pres {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        }
+        crate::process::snapshot_force(true);
+        if let Some(c) = cid {
+            if !self.is_presence_locked(c) {
+                self.live_unlocked
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .remove(c);
+            }
+        }
+        self.invalidate(cid);
+        let status = self.lock_status(cid)?;
+        Ok(json!({
+            "ok": true,
+            "provider": self.paths.id,
+            "cid": cid,
+            "pids": pids,
+            "restarted": !pids.is_empty(),
+            "locked": status["locked"],
+            "file_locked": status["locked"],
+            "reason": status["reason"],
+            "lock_reason": status["reason"],
+            "live_unlocked": status["live_unlocked"],
+            "presence_locked": status["presence_locked"],
+            "can_unlock_db": true,
+            "can_restart_hub": true,
+        }))
+    }
+    fn write_gate(&self, cid: &str) -> Result<(Option<File>, Vec<String>)> {
+        let (guard, bypassed_presence) = self.presence_guard_for_write(cid)?;
+        ensure!(self.db(cid).is_file(), "Диалог {cid} не найден.");
+        db_probe_with_timeout(&self.db(cid), Duration::from_millis(800)).with_context(|| {
             format!(
                 "Файл диалога {} занят. Закройте приложение и повторите.",
                 self.paths.name
             )
         })?;
-        db_probe(&self.summaries())?;
+        db_probe_with_timeout(&self.summaries(), Duration::from_millis(800))?;
         let mut warns = Vec::new();
-        if !self.running().is_empty() {
-            warns.push(format!("{} запущен, но файлы этого диалога свободны. Изменения появятся в приложении после его перезапуска.",self.paths.name));
+        if bypassed_presence {
+            warns.push(format!(
+                "Live Unlock: правка записана в WAL-БД {} при активном диалоге. Чтобы приложение подхватило изменения из БД, переоткройте диалог или перезапустите Hub.",
+                self.paths.name
+            ));
+        } else if !self.running().is_empty() {
+            warns.push(format!(
+                "{} запущен, но файлы этого диалога свободны. Изменения появятся в приложении после его перезапуска.",
+                self.paths.name
+            ));
         }
         if self.test_mode() {
             warns.push("Тест-режим: данные пишутся в песочницу.".to_owned());
@@ -812,10 +963,23 @@ impl AntigravityProvider {
     fn entries(&self, cid: &str, d: &Value) -> Result<Value> {
         let (flat, turns) = self.flat_entries(cid);
         let (window, msgs, total, start) = self.page(&flat, d);
-        let lock = self.probe_lock(Some(cid))?;
-        Ok(
-            json!({"provider":self.paths.id,"cid":cid,"turns":if window.is_empty(){json!([])}else{json!([{ "items":window }])},"page_msgs":msgs,"total_label":format!("ходов: {turns} · записей: {total}"),"cursor":if start>0{json!(start.to_string())}else{Value::Null},"has_more":start>0,"writable":true,"file_locked":lock.is_some(),"lock_reason":lock.unwrap_or_default()}),
-        )
+        let status = self.lock_status(Some(cid))?;
+        Ok(json!({
+            "provider": self.paths.id,
+            "cid": cid,
+            "turns": if window.is_empty() { json!([]) } else { json!([{ "items": window }]) },
+            "page_msgs": msgs,
+            "total_label": format!("ходов: {turns} · записей: {total}"),
+            "cursor": if start > 0 { json!(start.to_string()) } else { Value::Null },
+            "has_more": start > 0,
+            "writable": true,
+            "file_locked": status["locked"],
+            "lock_reason": status["reason"],
+            "live_unlocked": status["live_unlocked"],
+            "presence_locked": status["presence_locked"],
+            "can_unlock_db": status["can_unlock_db"],
+            "can_restart_hub": status["can_restart_hub"],
+        }))
     }
     fn step(&self, cid: &str, idx: i64) -> Result<(i64, Vec<u8>)> {
         let con = ro(&self.db(cid))?;
@@ -982,10 +1146,10 @@ impl AntigravityProvider {
             p.join(format!("{cid}.db")).is_file(),
             "В копии отсутствует база диалога"
         );
-        let _presence = self.presence_guard(cid)?;
-        db_probe(&self.db(cid))?;
-        db_probe(&self.summaries())?;
-        copy_db(&p.join(format!("{cid}.db")), &self.db(cid))?;
+        let (_presence, _) = self.presence_guard_for_write(cid)?;
+        db_probe_with_timeout(&self.db(cid), Duration::from_millis(800))?;
+        db_probe_with_timeout(&self.summaries(), Duration::from_millis(800))?;
+        restore_db_safe(&p.join(format!("{cid}.db")), &self.db(cid))?;
         let source = p.join("brain").join(cid).join(".system_generated");
         if source.exists() {
             let dest = self.brain(cid);
@@ -995,7 +1159,7 @@ impl AntigravityProvider {
             copy_tree(&source, &dest)?;
         }
         if p.join("conversation_summaries.db").is_file() {
-            copy_db(&p.join("conversation_summaries.db"), &self.summaries())?;
+            restore_db_safe(&p.join("conversation_summaries.db"), &self.summaries())?;
         }
         let ann = p.join("annotations").join(format!("{cid}.pbtxt"));
         if ann.is_file() && !self.annotation(cid).exists() {
@@ -1128,6 +1292,7 @@ impl AntigravityProvider {
         let integrity: String = tx.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
         ensure!(integrity == "ok", "integrity_check fail: {integrity}");
         tx.commit()?;
+        wal_checkpoint_passive(&con);
         let mut rep =
             json!({"cid":cid,"step_index":idx,"side":side.to_lowercase(),"integrity_check":"ok"});
         let mut updated = false;
@@ -1432,6 +1597,7 @@ impl AntigravityProvider {
             break;
         }
         tx.commit()?;
+        wal_checkpoint_passive(&con);
         Ok(done.unwrap_or_else(||json!({"fts_updated":false,"fts_reason":format!("step {idx} not found in FTS {side} body")})))
     }
     fn cut_summaries(
@@ -1522,6 +1688,7 @@ impl AntigravityProvider {
             }
         }
         tx.commit()?;
+        wal_checkpoint_passive(&con);
         Ok(())
     }
     fn remove_counts(&self, cid: &str, keep: i64, mode: &str) -> (usize, usize, usize) {
@@ -1617,6 +1784,7 @@ impl AntigravityProvider {
                 Ok((r.get(0)?, r.get(1)?))
             })?;
         tx.commit()?;
+        wal_checkpoint_passive(&con);
         drop(con);
         rep["gen_metadata_removed"] = json!(gen_deleted);
         rep["integrity_check"] = json!(["ok"]);
@@ -1880,6 +2048,7 @@ impl AntigravityProvider {
                     )?;
                 }
                 tx.commit()?;
+                wal_checkpoint_passive(&con);
             }
             Ok(())
         })();
@@ -1899,6 +2068,10 @@ impl AntigravityProvider {
         if presence.exists() {
             let _ = fs::remove_file(presence);
         }
+        self.live_unlocked
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(cid);
         self.invalidate(Some(cid));
         ctx.phase("done");
         Ok(json!({"deleted":cid,"provider":self.paths.id,"backup":backup,"warns":warns}))
@@ -2319,11 +2492,13 @@ impl Provider for AntigravityProvider {
     fn probe_lock(&self, cid: Option<&str>) -> Result<Option<String>> {
         if let Some(cid) = cid {
             safe_id(cid)?;
-            if let Err(error) = self.presence_guard(cid) {
-                return Ok(Some(format!(
-                    "Файл диалога {} занят ({error}). Закройте {} и повторите.",
-                    self.paths.name, self.paths.name
-                )));
+            if !self.is_live_unlocked(cid) {
+                if let Err(error) = self.presence_guard(cid) {
+                    return Ok(Some(format!(
+                        "Файл диалога {} занят ({error}). Закройте {} и повторите.",
+                        self.paths.name, self.paths.name
+                    )));
+                }
             }
             if let Err(error) = db_probe(&self.db(cid)) {
                 return Ok(Some(format!(
@@ -2339,6 +2514,19 @@ impl Provider for AntigravityProvider {
             )));
         }
         Ok(None)
+    }
+    fn lock_status(&self, cid: Option<&str>) -> Result<Value> {
+        let reason = self.probe_lock(cid)?;
+        let live_unlocked = cid.is_some_and(|c| self.is_live_unlocked(c));
+        let presence_locked = cid.is_some_and(|c| self.is_presence_locked(c));
+        Ok(json!({
+            "locked": reason.is_some(),
+            "reason": reason.unwrap_or_default(),
+            "live_unlocked": live_unlocked,
+            "presence_locked": presence_locked,
+            "can_unlock_db": true,
+            "can_restart_hub": true,
+        }))
     }
     fn call(&self, op: &str, d: &Value, ctx: &OpContext) -> Result<Value> {
         match op {
@@ -2358,8 +2546,12 @@ impl Provider for AntigravityProvider {
                 ctx.phase("done");
                 Ok(json!({"restored":path,"provider":self.paths.id}))
             }
+            "restart_hub" => {
+                let cid = d["cid"].as_str().filter(|s| !s.is_empty());
+                self.restart_hub(cid)
+            }
             "entries" | "edit_preview" | "apply_edit" | "preview_cut" | "apply_cut"
-            | "delete_conv" | "export_chat" => {
+            | "delete_conv" | "export_chat" | "unlock_db" | "relock_db" => {
                 let cid = required(d, "cid")?;
                 safe_id(cid)?;
                 match op {
@@ -2376,6 +2568,8 @@ impl Provider for AntigravityProvider {
                     "export_chat" => {
                         self.export_chat(cid, d["include_tools"].as_bool().unwrap_or(true))
                     }
+                    "unlock_db" => self.unlock_db(cid),
+                    "relock_db" => self.relock_db(cid),
                     _ => unreachable!(),
                 }
             }
@@ -2940,5 +3134,98 @@ mod tests {
         assert_eq!(think_it["subtype"], "thinking");
         assert_eq!(think_it["label"], "Размышления");
         assert_eq!(think_it["text"], "Only thinking step");
+    }
+
+    #[test]
+    fn live_unlock_allows_edit_and_wal_safe_restore_while_db_is_open() {
+        let (_tmp, p) = fixture();
+        // Switch DBs to WAL mode and keep concurrent open reader handles like language_server does.
+        let db_con = rw(&p.db(CID)).unwrap();
+        db_con.execute_batch("PRAGMA journal_mode=WAL;").unwrap();
+        let sum_con = rw(&p.summaries()).unwrap();
+        sum_con.execute_batch("PRAGMA journal_mode=WAL;").unwrap();
+
+        let live_reader = ro(&p.db(CID)).unwrap();
+        let live_sum_reader = ro(&p.summaries()).unwrap();
+        let initial_rows: i64 = live_reader
+            .query_row("SELECT count(*) FROM steps", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(initial_rows, 4);
+
+        #[cfg(unix)]
+        let (db_ino_before, sum_ino_before, _presence_holder) = {
+            use std::os::unix::fs::MetadataExt;
+            let pdir = p.paths.root.join("presence");
+            fs::create_dir_all(&pdir).unwrap();
+            let lock_path = pdir.join(format!("{CID}.lock"));
+            let holder = File::create(&lock_path).unwrap();
+            holder.lock_exclusive().unwrap();
+            let db_ino = fs::metadata(p.db(CID)).unwrap().ino();
+            let sum_ino = fs::metadata(p.summaries()).unwrap().ino();
+            (db_ino, sum_ino, holder)
+        };
+
+        #[cfg(unix)]
+        {
+            assert!(p.probe_lock(Some(CID)).unwrap().is_some());
+            assert!(p
+                .apply_edit(CID, 1, "should fail while locked", &OpContext::default())
+                .is_err());
+        }
+
+        let unlock_res = p.unlock_db(CID).unwrap();
+        assert_eq!(unlock_res["live_unlocked"], true);
+        assert_eq!(unlock_res["locked"], false);
+        assert!(p.probe_lock(Some(CID)).unwrap().is_none());
+
+        let rep = p
+            .apply_edit(CID, 1, "edited live in WAL", &OpContext::default())
+            .unwrap();
+        let backup_dir = rep["backup"].as_str().unwrap().to_owned();
+        #[cfg(unix)]
+        assert!(rep["warns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w.as_str().unwrap_or("").contains("Live Unlock")));
+
+        // Existing open reader immediately sees the WAL edit without corruption.
+        let edited_payload: Vec<u8> = live_reader
+            .query_row("SELECT step_payload FROM steps WHERE idx=1", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(
+            string_at(&edited_payload, &[20, 1]).as_deref(),
+            Some("edited live in WAL")
+        );
+
+        // Restore in-place while reader handles and presence lock remain active.
+        p.restore(Path::new(&backup_dir)).unwrap();
+        let restored_payload: Vec<u8> = live_reader
+            .query_row("SELECT step_payload FROM steps WHERE idx=1", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(
+            string_at(&restored_payload, &[20, 1]).as_deref(),
+            Some("one")
+        );
+        let sum_check: String = live_sum_reader
+            .query_row("PRAGMA quick_check", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(sum_check, "ok");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            assert_eq!(fs::metadata(p.db(CID)).unwrap().ino(), db_ino_before);
+            assert_eq!(fs::metadata(p.summaries()).unwrap().ino(), sum_ino_before);
+
+            let relock = p.relock_db(CID).unwrap();
+            assert_eq!(relock["live_unlocked"], false);
+            assert_eq!(relock["locked"], true);
+            assert!(p.probe_lock(Some(CID)).unwrap().is_some());
+        }
     }
 }

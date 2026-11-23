@@ -499,6 +499,31 @@ impl Service {
         if matches!(op, "add_system_notice" | "delete_system_notices") && pid != "claude" {
             bail!("Системные уведомления доступны только для диалогов Claude.");
         }
+        if matches!(op, "unlock_db" | "relock_db" | "restart_hub") {
+            if !matches!(pid, "antigravity" | "antigravity_cli") {
+                bail!("Живой анлок БД поддерживается только для Antigravity.");
+            }
+            let _guard = self.locks[pid].lock().unwrap_or_else(|e| e.into_inner());
+            let res = p.call(op, &data, &self.context())?;
+            if let Some(cid) = data["cid"].as_str().filter(|s| !s.is_empty()) {
+                if let Ok(mut status) = p.lock_status(Some(cid)) {
+                    if let Some(obj) = status.as_object_mut() {
+                        obj.insert("type".into(), json!("conv_lock"));
+                        obj.insert("provider".into(), json!(pid));
+                        obj.insert("cid".into(), json!(cid));
+                        (self.emit)(status);
+                    }
+                }
+            }
+            if op == "restart_hub" {
+                if let Ok(st) = p.call("state", &json!({}), &self.context()) {
+                    let mut delta = Map::new();
+                    delta.insert(pid.into(), st);
+                    (self.emit)(json!({"type":"procs","providers":delta}));
+                }
+            }
+            return Ok(res);
+        }
         if op == "convert_chat" {
             let cid = required(&data, "cid")?.to_owned();
             let dst = self.provider(required(&data, "dst_provider")?)?;
@@ -910,12 +935,15 @@ impl Service {
                     if let Some(lock) = service.locks.get(&id) {
                         if let Ok(_guard) = lock.try_lock() {
                             if let Ok(p) = service.provider(&id) {
-                                if let Ok(reason) = p.probe_lock(Some(&cid)) {
-                                    let next = (id.clone(), cid.clone(), reason.clone());
+                                if let Ok(mut status) = p.lock_status(Some(&cid)) {
+                                    let next = (id.clone(), cid.clone(), status.clone());
                                     if previous_lock.as_ref() != Some(&next) {
-                                        (service.emit)(
-                                            json!({"type":"conv_lock","provider":id,"cid":cid,"locked":reason.is_some(),"reason":reason.unwrap_or_default()}),
-                                        );
+                                        if let Some(obj) = status.as_object_mut() {
+                                            obj.insert("type".into(), json!("conv_lock"));
+                                            obj.insert("provider".into(), json!(id));
+                                            obj.insert("cid".into(), json!(cid));
+                                            (service.emit)(status);
+                                        }
                                         previous_lock = Some(next);
                                     }
                                 }

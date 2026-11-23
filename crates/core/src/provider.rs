@@ -38,6 +38,13 @@ pub trait Provider: Send + Sync {
     fn probe_lock(&self, _cid: Option<&str>) -> Result<Option<String>> {
         Ok(None)
     }
+    fn lock_status(&self, cid: Option<&str>) -> Result<Value> {
+        let reason = self.probe_lock(cid)?;
+        Ok(serde_json::json!({
+            "locked": reason.is_some(),
+            "reason": reason.unwrap_or_default(),
+        }))
+    }
     fn assert_writable(&self, cid: Option<&str>) -> Result<()> {
         if let Some(reason) = self.probe_lock(cid)? {
             bail!(reason);

@@ -1,10 +1,11 @@
 use std::{
-    collections::{BTreeMap, HashMap, HashSet, VecDeque},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque},
+    fs,
     path::Path,
     sync::{Mutex, OnceLock},
     time::{Duration, Instant},
 };
-use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
+use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, Signal, System, UpdateKind};
 
 pub type ProcessMap = BTreeMap<String, Vec<String>>;
 
@@ -704,6 +705,109 @@ pub fn format_running(items: &[String]) -> String {
         .join(", ")
 }
 
+fn is_matching_ag_hub(
+    provider_id: &str,
+    name: &str,
+    exe: &str,
+    cmd: &str,
+    from_daemon_file: bool,
+) -> bool {
+    if !matches!(name, "language_server" | "language_server.exe") {
+        return false;
+    }
+    let is_cli = exe.contains("antigravity-cli") || cmd.contains("antigravity-cli");
+    match provider_id {
+        "antigravity_cli" => is_cli || from_daemon_file,
+        "antigravity" => {
+            !is_cli
+                && (from_daemon_file || exe.contains("antigravity") || cmd.contains("antigravity"))
+        }
+        _ => false,
+    }
+}
+
+pub fn stop_antigravity_hubs(provider_id: &str, daemon_dir: &Path) -> Vec<u32> {
+    if !matches!(provider_id, "antigravity" | "antigravity_cli") {
+        return Vec::new();
+    }
+    let mut daemon_pids = HashSet::<u32>::new();
+    if let Ok(entries) = fs::read_dir(daemon_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Some(fname) = path.file_name().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            if !fname.starts_with("hub_") || !fname.ends_with(".json") {
+                continue;
+            }
+            if let Ok(bytes) = fs::read(&path) {
+                if let Ok(val) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+                    if let Some(pid) = val.get("pid").and_then(|v| v.as_u64()) {
+                        if let Ok(uid) = u32::try_from(pid) {
+                            daemon_pids.insert(uid);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let mut system = System::new();
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::All,
+        true,
+        ProcessRefreshKind::nothing()
+            .with_cmd(UpdateKind::Always)
+            .with_exe(UpdateKind::Always),
+    );
+
+    let self_pid = std::process::id();
+    let mut signaled = BTreeSet::<u32>::new();
+    for (pid, proc_info) in system.processes() {
+        let uid = pid.as_u32();
+        if uid == self_pid {
+            continue;
+        }
+        let name = proc_info.name().to_string_lossy().to_lowercase();
+        let exe = proc_info
+            .exe()
+            .map(|v| v.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        let cmd = proc_info
+            .cmd()
+            .iter()
+            .map(|s| s.to_string_lossy())
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_lowercase();
+        let from_daemon = daemon_pids.contains(&uid);
+        if is_matching_ag_hub(provider_id, &name, &exe, &cmd, from_daemon) {
+            let sent = match proc_info.kill_with(Signal::Term) {
+                Some(ok) => ok,
+                None => proc_info.kill(),
+            };
+            if sent {
+                signaled.insert(uid);
+            }
+        }
+    }
+    signaled.into_iter().collect()
+}
+
+pub fn any_pid_alive(pids: &[u32]) -> bool {
+    if pids.is_empty() {
+        return false;
+    }
+    let targets: Vec<Pid> = pids.iter().copied().map(Pid::from_u32).collect();
+    let mut system = System::new();
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&targets),
+        true,
+        ProcessRefreshKind::nothing(),
+    );
+    targets.iter().any(|pid| system.process(*pid).is_some())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1014,5 +1118,44 @@ mod tests {
         assert!(map["codex"].is_empty());
         assert!(map["claude"].is_empty());
         assert!(map["antigravity"].is_empty());
+    }
+
+    #[test]
+    fn matches_only_target_antigravity_hub_processes() {
+        assert!(is_matching_ag_hub(
+            "antigravity",
+            "language_server",
+            "/applications/antigravity.app/contents/resources/bin/language_server",
+            "language_server --standalone",
+            false
+        ));
+        assert!(!is_matching_ag_hub(
+            "antigravity",
+            "antigravity",
+            "/applications/antigravity.app/contents/macos/antigravity",
+            "/applications/antigravity.app/contents/macos/antigravity",
+            true
+        ));
+        assert!(!is_matching_ag_hub(
+            "antigravity",
+            "language_server",
+            "/users/eth/.gemini/antigravity-cli/bin/language_server",
+            "language_server --app_data_dir antigravity-cli",
+            true
+        ));
+        assert!(is_matching_ag_hub(
+            "antigravity_cli",
+            "language_server",
+            "/users/eth/.gemini/antigravity-cli/bin/language_server",
+            "language_server --app_data_dir antigravity-cli",
+            false
+        ));
+        assert!(!is_matching_ag_hub(
+            "codex",
+            "language_server",
+            "/applications/antigravity.app/contents/resources/bin/language_server",
+            "language_server",
+            true
+        ));
     }
 }

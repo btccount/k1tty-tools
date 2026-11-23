@@ -137,7 +137,19 @@ const I18N = {
     status_ro: "Только чтение",
     pill_running: "{name} открыт",
     pill_blocked: "{name} занят",
+    pill_live_unlocked: "Live Unlock",
     running_guard_banner: "Файл диалога занят {name} · Закройте этот диалог или приложение для редактирования",
+    running_guard_unlock_banner: "Файл диалога занят {name} · Можно разблокировать БД для WAL-правки или перезапустить Hub",
+    live_unlocked_banner: "Live Unlock активен · WAL-запись в БД {name} открыта. После правки переоткройте диалог или перезапустите Hub",
+    unlock_db_btn: "Разблокировать БД",
+    relock_db_btn: "Вернуть защиту",
+    restart_hub_btn: "Перезапустить Hub",
+    unlocking_db: "Разблокировка...",
+    restarting_hub: "Перезапуск Hub...",
+    toast_db_unlocked: "БД разблокирована (Live Unlock · WAL)",
+    toast_db_relocked: "Защита присутствия возвращена",
+    toast_hub_restarted: "Hub {name} перезапущен (PID: {pids})",
+    toast_hub_not_found: "Активный процесс Hub {name} не найден",
     toast_close_app_first: "Файл занят {name} · Закройте диалог или приложение",
     actions: "Действия",
     open: "Открыть",
@@ -459,7 +471,19 @@ const I18N = {
     status_ro: "Лише читання",
     pill_running: "{name} відкрито",
     pill_blocked: "{name} зайнятий",
+    pill_live_unlocked: "Live Unlock",
     running_guard_banner: "Файл діалогу зайнятий {name} · Закрийте цей діалог або застосунок для редагування",
+    running_guard_unlock_banner: "Файл діалогу зайнятий {name} · Можна розблокувати БД для WAL-правки або перезапустити Hub",
+    live_unlocked_banner: "Live Unlock активний · WAL-запис у БД {name} відкрито. Після правки перевідкрийте діалог або перезапустіть Hub",
+    unlock_db_btn: "Розблокувати БД",
+    relock_db_btn: "Повернути захист",
+    restart_hub_btn: "Перезапустити Hub",
+    unlocking_db: "Розблокування...",
+    restarting_hub: "Перезапуск Hub...",
+    toast_db_unlocked: "БД розблоковано (Live Unlock · WAL)",
+    toast_db_relocked: "Захист присутності повернуто",
+    toast_hub_restarted: "Hub {name} перезапущено (PID: {pids})",
+    toast_hub_not_found: "Активний процес Hub {name} не знайдено",
     toast_close_app_first: "Файл зайнятий {name} · Закрийте діалог або застосунок",
     actions: "Дії",
     open: "Відкрити",
@@ -781,7 +805,19 @@ const I18N = {
     status_ro: "Read only",
     pill_running: "{name} open",
     pill_blocked: "{name} locked",
+    pill_live_unlocked: "Live Unlock",
     running_guard_banner: "Dialogue file is in use by {name} · Close the dialogue or app to edit",
+    running_guard_unlock_banner: "Dialogue file is in use by {name} · Unlock DB for WAL editing or restart the Hub",
+    live_unlocked_banner: "Live Unlock active · WAL writes to {name} DB enabled. Reopen the chat or restart Hub to reload changes",
+    unlock_db_btn: "Unlock DB",
+    relock_db_btn: "Relock",
+    restart_hub_btn: "Restart Hub",
+    unlocking_db: "Unlocking...",
+    restarting_hub: "Restarting Hub...",
+    toast_db_unlocked: "DB unlocked (Live Unlock · WAL)",
+    toast_db_relocked: "Presence lock guard restored",
+    toast_hub_restarted: "{name} Hub restarted (PID: {pids})",
+    toast_hub_not_found: "No running {name} Hub process found",
     toast_close_app_first: "File is in use by {name} · Close the dialogue or app first",
     actions: "Actions",
     open: "Open",
@@ -3158,6 +3194,7 @@ function isConvLocked(provId, cid = null) {
   if (STATE.active && !STATE.active.readonlyBackup && STATE.active.provider === provId) {
     if (!cid || STATE.active.id === cid) {
       if (STATE.active.fileLocked) return true;
+      if (STATE.active.liveUnlocked) return false;
     }
   }
   return !!STATE.providers[provId]?.blocked;
@@ -3170,40 +3207,131 @@ function guardNotRunning(provId, cid = null) {
   return false;
 }
 
+let dbUnlockActionPending = false;
+
 function syncRunningGuard() {
   const wrap = $("#chatWrap");
   const banner = $("#runningGuardBanner");
   const txtEl = $("#runningGuardText");
+  const iconEl = $("#runningGuardIcon");
+  const actionsEl = $("#runningGuardActions");
+  const unlockBtn = $("#runningUnlockDbBtn");
+  const restartBtn = $("#runningRestartHubBtn");
+  const relockBtn = $("#runningRelockDbBtn");
   if (!wrap || !banner || !txtEl) return;
   if (!STATE.active || STATE.active.readonlyBackup) {
     wrap.classList.remove("app-locked");
     banner.classList.add("hidden");
+    banner.classList.remove("is-live-unlocked");
+    if (actionsEl) actionsEl.classList.add("hidden");
     return;
   }
   const pid = STATE.active.provider;
   const locked = isConvLocked(pid, STATE.active.id);
+  const canUnlock = !!(STATE.active.canUnlockDb || pid === "antigravity" || pid === "antigravity_cli");
+  const canRestart = !!(STATE.active.canRestartHub || pid === "antigravity" || pid === "antigravity_cli");
+  const liveUnlockedActive = !locked && !!STATE.active.liveUnlocked && !!STATE.active.presenceLocked;
+  const pname = PROV[pid]?.name || pid;
+
   wrap.classList.toggle("app-locked", locked);
   if (locked) {
-    const pname = PROV[pid]?.name || pid;
-    txtEl.textContent = t("running_guard_banner", { name: pname });
+    banner.classList.remove("hidden", "is-live-unlocked");
+    if (iconEl) iconEl.innerHTML = '<use href="#i-lock"/>';
+    txtEl.textContent = t(canUnlock ? "running_guard_unlock_banner" : "running_guard_banner", { name: pname });
+    if (actionsEl) actionsEl.classList.toggle("hidden", !canUnlock && !canRestart);
+    if (unlockBtn) {
+      unlockBtn.classList.toggle("hidden", !canUnlock);
+      unlockBtn.disabled = dbUnlockActionPending;
+    }
+    if (restartBtn) {
+      restartBtn.classList.toggle("hidden", !canRestart);
+      restartBtn.disabled = dbUnlockActionPending;
+    }
+    if (relockBtn) relockBtn.classList.add("hidden");
+  } else if (liveUnlockedActive) {
     banner.classList.remove("hidden");
+    banner.classList.add("is-live-unlocked");
+    if (iconEl) iconEl.innerHTML = '<use href="#i-unlock"/>';
+    txtEl.textContent = t("live_unlocked_banner", { name: pname });
+    if (actionsEl) actionsEl.classList.remove("hidden");
+    if (unlockBtn) unlockBtn.classList.add("hidden");
+    if (restartBtn) {
+      restartBtn.classList.toggle("hidden", !canRestart);
+      restartBtn.disabled = dbUnlockActionPending;
+    }
+    if (relockBtn) {
+      relockBtn.classList.remove("hidden");
+      relockBtn.disabled = dbUnlockActionPending;
+    }
   } else {
     banner.classList.add("hidden");
+    banner.classList.remove("is-live-unlocked");
+    if (actionsEl) actionsEl.classList.add("hidden");
   }
   const lockBtn = $("#threadLockBtn");
   if (lockBtn) lockBtn.disabled = locked;
   updateThreadNoticesBtn();
-  const unlockBtn = $("#unlockerApplyBtn");
-  if (unlockBtn) unlockBtn.disabled = locked;
+  const codexUnlockBtn = $("#unlockerApplyBtn");
+  if (codexUnlockBtn) codexUnlockBtn.disabled = locked;
+}
+
+function applyConvLockPayload(target, msg) {
+  if (!target || !msg) return;
+  if ("locked" in msg) target.fileLocked = !!msg.locked;
+  if ("file_locked" in msg) target.fileLocked = !!msg.file_locked;
+  if ("reason" in msg) target.lockReason = msg.reason || "";
+  if ("lock_reason" in msg) target.lockReason = msg.lock_reason || "";
+  if ("live_unlocked" in msg) target.liveUnlocked = !!msg.live_unlocked;
+  if ("presence_locked" in msg) target.presenceLocked = !!msg.presence_locked;
+  if ("can_unlock_db" in msg) target.canUnlockDb = !!msg.can_unlock_db;
+  if ("can_restart_hub" in msg) target.canRestartHub = !!msg.can_restart_hub;
 }
 
 function onConvLockUpdate(msg) {
   if (!STATE.active || STATE.active.readonlyBackup) return;
   if (STATE.active.provider !== msg.provider || STATE.active.id !== msg.cid) return;
-  STATE.active.fileLocked = !!msg.locked;
-  STATE.active.lockReason = msg.reason || "";
+  applyConvLockPayload(STATE.active, msg);
   refreshStatusBadge();
 }
+
+async function runLiveUnlockOp(op) {
+  if (dbUnlockActionPending || !STATE.active || STATE.active.readonlyBackup) return;
+  const { provider, id } = STATE.active;
+  const pname = PROV[provider]?.name || provider;
+  dbUnlockActionPending = true;
+  syncRunningGuard();
+  try {
+    const res = await rpc(op, provider, { cid: id });
+    if (STATE.active && STATE.active.provider === provider && STATE.active.id === id) {
+      applyConvLockPayload(STATE.active, res);
+    }
+    refreshStatusBadge();
+    if (op === "unlock_db") {
+      toast(t("toast_db_unlocked"), "ok");
+    } else if (op === "relock_db") {
+      toast(t("toast_db_relocked"), "ok");
+    } else if (op === "restart_hub") {
+      const pids = Array.isArray(res.pids) ? res.pids : [];
+      if (pids.length) {
+        toast(t("toast_hub_restarted", { name: pname, pids: pids.join(", ") }), "ok");
+      } else {
+        toast(t("toast_hub_not_found", { name: pname }));
+      }
+      if (STATE.active && STATE.active.provider === provider && STATE.active.id === id) {
+        refreshCurrentTranscript({ force: true }).catch(() => {});
+      }
+    }
+  } catch (err) {
+    toast(err?.message || String(err), "err");
+  } finally {
+    dbUnlockActionPending = false;
+    syncRunningGuard();
+  }
+}
+
+$("#runningUnlockDbBtn")?.addEventListener("click", () => runLiveUnlockOp("unlock_db"));
+$("#runningRelockDbBtn")?.addEventListener("click", () => runLiveUnlockOp("relock_db"));
+$("#runningRestartHubBtn")?.addEventListener("click", () => runLiveUnlockOp("restart_hub"));
 
 function refreshStatusBadge() {
   const pid = statusTargetProvider();
@@ -3246,12 +3374,19 @@ function updateThreadStatus(provId, writable) {
   let show = false, cls = "", iconName = "app-window", pillTxt = "", msg = "";
   const pname = PROV[provId]?.name || st.name || provId;
   const activeFileLocked = !!(STATE.active && !STATE.active.readonlyBackup && STATE.active.provider === provId && STATE.active.fileLocked);
-  if (activeFileLocked || st.blocked) {
+  const activeLiveUnlocked = !!(STATE.active && !STATE.active.readonlyBackup && STATE.active.provider === provId && !activeFileLocked && STATE.active.liveUnlocked && STATE.active.presenceLocked);
+  if (activeFileLocked || (st.blocked && !activeLiveUnlocked)) {
     show = true;
     cls = "err";
     iconName = "lock";
     pillTxt = t("pill_blocked", { name: pname });
     msg = t("toast_close_app_first", { name: pname });
+  } else if (activeLiveUnlocked) {
+    show = true;
+    cls = "running";
+    iconName = "unlock";
+    pillTxt = t("pill_live_unlocked");
+    msg = t("live_unlocked_banner", { name: pname });
   } else if (st.available && st.running && st.running.length) {
     show = true;
     cls = "running";
@@ -3639,6 +3774,10 @@ async function applyTranscriptResponse(response, { preserve = false, showSys = S
     active.writable = response.writable !== false;
     active.fileLocked = !!response.file_locked;
     active.lockReason = response.lock_reason || "";
+    active.liveUnlocked = !!response.live_unlocked;
+    active.presenceLocked = !!response.presence_locked;
+    active.canUnlockDb = !!response.can_unlock_db;
+    active.canRestartHub = !!response.can_restart_hub;
     active.blockedInfo = response.blocked_info || null;
     if (response.block_presets?.length) LOCK_PRESETS = response.block_presets;
     updateThreadLockBtn();
