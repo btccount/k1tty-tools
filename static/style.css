@@ -3360,7 +3360,8 @@ code.inline {
   border-radius: calc(var(--panel-radius, 12px) + 6px);
   text-align: center;
   align-items: stretch;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   background:
     radial-gradient(ellipse 85% 42% at 50% -8%, var(--accent-soft, rgba(117, 171, 245, 0.13)), transparent 74%),
     var(--bg-surface);
