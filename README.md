@@ -28,6 +28,11 @@ A native desktop application built with Rust + Tauri for viewing, editing, gener
 
 The built-in generator lets you compose realistic multi-turn dialogues from scratch and save them directly into Antigravity, Codex, Claude, or OpenCode. Supports **OpenRouter** (including `:free` models), **DeepSeek**, and any OpenAI-compatible **Custom API** (Ollama, LM Studio, vLLM, etc.). Configure topic, length, language, reasoning effort, temperature, optional project folder context, system prompt, plus synthetic tool calls (`tool_use` / `tool_result`) and `thinking` blocks. Every generated dialogue is automatically archived under "Saved", and individual messages can be reviewed or edited before saving. On sensitive or trigger topics (such as cheats), some models may refuse or produce incomplete output - in those cases, use **DeepSeek** or adjust the generator system prompt manually in advanced settings.
 
+<p>
+  <img src="docs/screenshots/generate.png" width="49%" alt="Генератор диалогов: настройка модели, контекста и сценария / Dialogue generator: model, context, and scenario setup">
+  <img src="docs/screenshots/generate-preview.png" width="49%" alt="Генератор диалогов: предпросмотр реплик, инструментов и сохранение / Dialogue generator: turn preview, tool calls, and saving">
+</p>
+
 ### Блокировки в Codex / Codex Locks
 
 Когда Codex блокирует чат из-за фильтров безопасности, инструмент показывает причину и снимает блокировку в один клик. Тред можно и вручную заблокировать с любой указанной причиной для тестов.
@@ -41,7 +46,7 @@ When Codex blocks a chat due to safety filters, the tool shows the reason and un
 You can edit the system prompt, internal instructions, and chat metadata. Modify user messages and model responses. Edit tool calls (`tool_calls`), tool outputs, thinking blocks, and errors across all environments without breaking the file structure.
 
 <p>
-  <img src="docs/screenshots/chat.png" width="49%" alt="Просмотр диалога: таблицы, формулы LaTeX, diff и файловые ссылки / Dialogue view: tables, LaTeX formulas, diff, and file links">
+  <img src="docs/screenshots/chat.png" width="49%" alt="Просмотр диалога: поиск с подсветкой, таблицы, формулы LaTeX, diff и файловые ссылки / Dialogue view: search highlights, tables, LaTeX formulas, diff, and file links">
   <img src="docs/screenshots/edit.png" width="49%" alt="Редактирование ответа модели / Editing a model reply">
 </p>
 
@@ -129,9 +134,9 @@ The same conversation can be transferred to another environment to see how its m
 
 ## Установка / Installation
 
-Готовые установщики для всех ОС собираются автоматически в [GitHub Releases](https://github.com/quesada-lab/k1tty-tools/releases) (Python больше не нужен).
+Готовые установщики для всех ОС собираются автоматически в [GitHub Releases](https://github.com/quesada-lab/k1tty-tools/releases).
 
-Pre-built installers for all platforms are published automatically in [GitHub Releases](https://github.com/quesada-lab/k1tty-tools/releases) (Python is no longer required).
+Pre-built installers for all platforms are published automatically in [GitHub Releases](https://github.com/quesada-lab/k1tty-tools/releases).
 
 ### Windows
 
@@ -171,10 +176,6 @@ chmod +x K1tty\ Tools_*.AppImage
 ```bash
 sudo apt install ./K1tty\ Tools_*.deb
 ```
-
-> **Ограничения на macOS и Linux / macOS and Linux limitations:**
-> - Claude Code нельзя править, пока он запущен: на этих системах нельзя проверить, занят ли конкретный файл сессии, поэтому правка блокируется целиком, пока работает любой процесс Claude.
-> - Claude Code history cannot be edited while Claude is running: these systems cannot tell whether a specific session file is in use, so editing is blocked while any Claude process is running.
 
 ## Сборка из исходников / Building From Source
 
