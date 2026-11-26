@@ -18,6 +18,7 @@ mod antigravity;
 mod claude;
 mod codex;
 mod opencode;
+mod tools;
 
 pub fn export_provider_chat(src: &dyn Provider, cid: &str, include_tools: bool) -> Result<Value> {
     src.call(

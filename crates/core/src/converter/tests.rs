@@ -579,3 +579,247 @@ fn cleanup_preserves_existing_workspace_and_concurrent_index_rows() {
         b"{\"id\":\"old\"}\n{\"id\":\"concurrent\"}\n"
     );
 }
+
+fn native_tool_sample(dir: &Path) -> Value {
+    let dir_s = dir.to_string_lossy().into_owned();
+    let main_cpp = dir
+        .join("src")
+        .join("main.cpp")
+        .to_string_lossy()
+        .into_owned();
+    let menu_cpp = dir
+        .join("src")
+        .join("menu.cpp")
+        .to_string_lossy()
+        .into_owned();
+    let notes_md = dir.join("notes.md").to_string_lossy().into_owned();
+    json!({
+        "meta": {
+            "source_provider": "deepseek",
+            "source_id": "native-tool-sample",
+            "title": "Native Tools Check",
+            "directory": dir_s
+        },
+        "entries": [
+            {"kind":"user","text":"Inspect project, edit menu, run build.","ts":"2026-11-26T10:00:00Z"},
+            {"kind":"tool","subtype":"thinking","tool":"thinking","text":"Check directory and read main.cpp first","ts":"2026-11-26T10:00:01Z"},
+            {"kind":"tool","subtype":"tool_use","tool":"list_dir","text":serde_json::to_string(&json!({"path":dir_s})).unwrap(),"status":"ok","ts":"2026-11-26T10:00:02Z"},
+            {"kind":"tool","subtype":"tool_result","tool":"list_dir","text":"src/\nCMakeLists.txt","status":"ok","ts":"2026-11-26T10:00:03Z"},
+            {"kind":"tool","subtype":"tool_use","tool":"read_file","text":serde_json::to_string(&json!({"path":main_cpp,"start_line":1,"end_line":40})).unwrap(),"status":"ok","ts":"2026-11-26T10:00:04Z"},
+            {"kind":"tool","subtype":"tool_result","tool":"read_file","text":"int main() { return 0; }","status":"ok","ts":"2026-11-26T10:00:05Z"},
+            {"kind":"tool","subtype":"tool_use","tool":"edit_file","text":serde_json::to_string(&json!({"path":menu_cpp,"old_string":"bool open = false;","new_string":"bool open = true;"})).unwrap(),"status":"ok","ts":"2026-11-26T10:00:06Z"},
+            {"kind":"tool","subtype":"tool_result","tool":"edit_file","text":"Updated menu.cpp","status":"ok","ts":"2026-11-26T10:00:07Z"},
+            {"kind":"tool","subtype":"tool_use","tool":"write_file","text":serde_json::to_string(&json!({"path":notes_md,"content":"# Notes\nReady\n"})).unwrap(),"status":"ok","ts":"2026-11-26T10:00:08Z"},
+            {"kind":"tool","subtype":"tool_result","tool":"write_file","text":"Created notes.md","status":"ok","ts":"2026-11-26T10:00:09Z"},
+            {"kind":"tool","subtype":"tool_use","tool":"grep_search","text":serde_json::to_string(&json!({"pattern":"ImGui","path":dir_s})).unwrap(),"status":"ok","ts":"2026-11-26T10:00:10Z"},
+            {"kind":"tool","subtype":"tool_result","tool":"grep_search","text":"src/menu.cpp:1: // ImGui","status":"ok","ts":"2026-11-26T10:00:11Z"},
+            {"kind":"tool","subtype":"tool_use","tool":"run_command","text":serde_json::to_string(&json!({"command":"cmake --build build"})).unwrap(),"status":"ok","ts":"2026-11-26T10:00:12Z"},
+            {"kind":"tool","subtype":"tool_result","tool":"run_command","text":"[100%] Built target app","status":"ok","ts":"2026-11-26T10:00:13Z"},
+            {"kind":"tool","subtype":"tool_use","tool":"web_search","text":serde_json::to_string(&json!({"query":"imgui Docking"})).unwrap(),"status":"ok","ts":"2026-11-26T10:00:14Z"},
+            {"kind":"tool","subtype":"tool_result","tool":"web_search","text":"ImGui docking branch docs","status":"ok","ts":"2026-11-26T10:00:15Z"},
+            {"kind":"tool","subtype":"tool_use","tool":"custom_lookup","text":"{\"id\":42}","status":"ok","ts":"2026-11-26T10:00:16Z"},
+            {"kind":"tool","subtype":"tool_result","tool":"custom_lookup","text":"entry #42","status":"ok","ts":"2026-11-26T10:00:17Z"},
+            {"kind":"assistant","text":"Done building the project.","ts":"2026-11-26T10:00:18Z"}
+        ]
+    })
+}
+
+#[test]
+fn native_tool_calls_format_properly_for_every_client() {
+    let d = tempfile::tempdir().unwrap();
+    let workspace = d.path().join("proj");
+    fs::create_dir_all(&workspace).unwrap();
+    let doc = native_tool_sample(&workspace);
+
+    let cx_root = d.path().join("codex");
+    let cx_res = codex::import(&doc, &cx_root, None, true, false).unwrap();
+    let tid = cx_res["cid"].as_str().unwrap();
+    let cx_rollout = recent_files(&cx_root.join("sessions"), 6, "jsonl").remove(0);
+    let cx_rows = crate::storage::read_jsonl(&cx_rollout).unwrap();
+    for row in &cx_rows {
+        let txt_msg = row["payload"]["item"]["content"][0]["text"]
+            .as_str()
+            .or_else(|| row["payload"]["content"][0]["text"].as_str())
+            .unwrap_or("");
+        assert!(
+            !txt_msg.starts_with("[edit_file]")
+                && !txt_msg.starts_with("[read_file]")
+                && !txt_msg.starts_with("[run_command]")
+                && !txt_msg.starts_with("[write_file]"),
+            "Codex must not emit fake [tool] text: {txt_msg}"
+        );
+    }
+    assert!(cx_rows.iter().any(|r| {
+        r["type"] == "response_item"
+            && r["payload"]["type"] == "custom_tool_call"
+            && r["payload"]["name"] == "apply_patch"
+            && r["payload"]["input"]
+                .as_str()
+                .is_some_and(|s| s.contains("*** Update File:") && s.contains("+bool open = true;"))
+    }));
+    assert!(cx_rows.iter().any(|r| {
+        r["type"] == "response_item"
+            && r["payload"]["type"] == "function_call"
+            && r["payload"]["name"] == "exec_command"
+            && r["payload"]["arguments"]
+                .as_str()
+                .is_some_and(|s| s.contains("cmake --build build"))
+    }));
+    assert!(cx_rows
+        .iter()
+        .any(|r| r["type"] == "response_item" && r["payload"]["type"] == "reasoning"));
+    let cx_db = readonly(&cx_root.join("thread_history_1.sqlite")).unwrap();
+    let mut item_types: Vec<(String, String)> = cx_db
+        .prepare("SELECT item_type, item_json FROM thread_items WHERE thread_id=? ORDER BY rollout_ordinal")
+        .unwrap()
+        .query_map([tid], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    assert!(item_types.iter().any(|(t, j)| {
+        t == "fileChange" && j.contains("\"type\":\"update\"") && j.contains("bool open = true;")
+    }));
+    assert!(item_types
+        .iter()
+        .any(|(t, j)| t == "fileChange" && j.contains("\"type\":\"add\"")));
+    assert!(item_types.iter().any(|(t, j)| {
+        t == "commandExecution" && j.contains("\"type\":\"read\"") && j.contains("main.cpp")
+    }));
+    assert!(item_types
+        .iter()
+        .any(|(t, j)| t == "commandExecution" && j.contains("cmake --build build")));
+    assert!(item_types.iter().any(|(t, _)| t == "webSearch"));
+    assert!(item_types
+        .iter()
+        .any(|(t, j)| t == "mcpToolCall" && j.contains("\"custom_lookup\"")));
+    assert!(!item_types.is_empty());
+    item_types.clear();
+
+    let cl_root = d.path().join("claude");
+    claude::import(&doc, &cl_root, None, true, false, None).unwrap();
+    let cl_file = recent_files(&cl_root.join("projects"), 2, "jsonl").remove(0);
+    let cl_rows = crate::storage::read_jsonl(&cl_file).unwrap();
+    let cl_tools: Vec<(&str, &Value)> = cl_rows
+        .iter()
+        .filter(|r| r["type"] == "assistant" && r["message"]["stop_reason"] == "tool_use")
+        .map(|r| {
+            let b = &r["message"]["content"][0];
+            (b["name"].as_str().unwrap(), &b["input"])
+        })
+        .collect();
+    assert_eq!(cl_tools[0].0, "Glob");
+    assert_eq!(cl_tools[1].0, "Read");
+    assert!(cl_tools[1].1["file_path"]
+        .as_str()
+        .unwrap()
+        .ends_with("main.cpp"));
+    assert_eq!(cl_tools[2].0, "Edit");
+    assert_eq!(cl_tools[2].1["old_string"], "bool open = false;");
+    assert_eq!(cl_tools[2].1["new_string"], "bool open = true;");
+    assert_eq!(cl_tools[3].0, "Write");
+    assert_eq!(cl_tools[4].0, "Grep");
+    assert_eq!(cl_tools[5].0, "Bash");
+    assert_eq!(cl_tools[5].1["command"], "cmake --build build");
+    assert_eq!(cl_tools[6].0, "WebSearch");
+    assert_eq!(cl_tools[7].0, "custom_lookup");
+
+    let ag_root = d.path().join("antigravity");
+    let ag_res = antigravity::import(&doc, &ag_root, false, None, true).unwrap();
+    let ag_cid = ag_res["cid"].as_str().unwrap();
+    let ag_db = readonly(&ag_root.join("conversations").join(format!("{ag_cid}.db"))).unwrap();
+    let planner_calls: Vec<(String, String, Option<String>)> = ag_db
+        .prepare("SELECT idx, step_payload FROM steps WHERE step_type=15 ORDER BY idx")
+        .unwrap()
+        .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Vec<u8>>(1)?)))
+        .unwrap()
+        .filter_map(|row| {
+            let (_, payload) = row.ok()?;
+            let name = crate::pbwire::string_at(&payload, &[20, 7, 2])?;
+            let args = crate::pbwire::string_at(&payload, &[20, 7, 3])?;
+            let th = crate::pbwire::string_at(&payload, &[20, 3]);
+            Some((name, args, th))
+        })
+        .collect();
+    assert_eq!(planner_calls.len(), 8);
+    assert_eq!(planner_calls[0].0, "list_dir");
+    assert_eq!(
+        planner_calls[0].2.as_deref(),
+        Some("Check directory and read main.cpp first")
+    );
+    assert_eq!(planner_calls[1].0, "read_file");
+    assert_eq!(planner_calls[2].0, "edit_file");
+    assert!(planner_calls[2]
+        .1
+        .contains("\"Target\":\"bool open = false;\""));
+    assert_eq!(planner_calls[5].0, "run_command");
+    assert!(planner_calls[5]
+        .1
+        .contains("\"CommandLine\":\"cmake --build build\""));
+    let gen_out: Vec<String> = ag_db
+        .prepare("SELECT step_payload FROM steps WHERE step_type=132 ORDER BY idx")
+        .unwrap()
+        .query_map([], |r| r.get::<_, Vec<u8>>(0))
+        .unwrap()
+        .filter_map(|row| crate::pbwire::string_at(&row.ok()?, &[140, 2, 1]))
+        .collect();
+    assert_eq!(gen_out.len(), 8);
+    assert_eq!(gen_out[2], "Updated menu.cpp");
+    let ag_hist = ag_root
+        .join("brain")
+        .join(ag_cid)
+        .join(".system_generated/logs/transcript_full.jsonl");
+    let ag_lines = crate::storage::read_jsonl(&ag_hist).unwrap();
+    assert_eq!(ag_lines[1]["type"], "PLANNER_RESPONSE");
+    assert_eq!(ag_lines[1]["tool_calls"][0]["name"], "list_dir");
+    assert_eq!(ag_lines[2]["type"], "GENERIC");
+    assert_eq!(ag_lines[2]["content"], "src/\nCMakeLists.txt");
+
+    let oc_db = d.path().join("opencode.db");
+    let oc_res = opencode::import(&doc, &oc_db, None, true).unwrap();
+    let oc_sid = oc_res["cid"].as_str().unwrap();
+    let oc = readonly(&oc_db).unwrap();
+    let msg_rows: Vec<String> = oc
+        .prepare(
+            "SELECT data FROM session_message WHERE session_id=? AND type='assistant' ORDER BY seq",
+        )
+        .unwrap()
+        .query_map([oc_sid], |r| r.get(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    let tool_parts: Vec<Value> = msg_rows
+        .iter()
+        .flat_map(|raw| {
+            serde_json::from_str::<Value>(raw).unwrap()["content"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+        })
+        .filter(|p| p["type"] == "tool")
+        .collect();
+    assert_eq!(tool_parts.len(), 8);
+    assert_eq!(tool_parts[0]["name"], "glob");
+    assert_eq!(tool_parts[1]["name"], "read");
+    assert_eq!(tool_parts[2]["name"], "edit");
+    assert_eq!(
+        tool_parts[2]["state"]["input"]["oldString"],
+        "bool open = false;"
+    );
+    assert_eq!(
+        tool_parts[2]["state"]["input"]["newString"],
+        "bool open = true;"
+    );
+    assert_eq!(
+        tool_parts[2]["state"]["content"][0]["text"],
+        "Updated menu.cpp"
+    );
+    assert_eq!(tool_parts[3]["name"], "write");
+    assert_eq!(tool_parts[4]["name"], "grep");
+    assert_eq!(tool_parts[5]["name"], "shell");
+    assert_eq!(
+        tool_parts[5]["state"]["input"]["command"],
+        "cmake --build build"
+    );
+    assert_eq!(tool_parts[6]["name"], "websearch");
+    assert_eq!(tool_parts[7]["name"], "custom_lookup");
+}

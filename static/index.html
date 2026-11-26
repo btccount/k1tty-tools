@@ -69,6 +69,8 @@
   <symbol id="i-check-square" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><rect width="18" height="18" x="3" y="3" rx="3"/><path d="m9 12 2 2 4-4"/></symbol>
   <symbol id="i-command" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3"/></symbol>
   <symbol id="i-gauge" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><path d="m15.5 7.5 2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L19 4"/><path d="m21 2-9.6 9.6"/><circle cx="7.5" cy="15.5" r="5.5"/></symbol>
+  <symbol id="i-arrow-left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" shape-rendering="geometricPrecision"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></symbol>
 </svg>
 
 <div class="top-loader" id="topLoader"></div>
@@ -94,6 +96,9 @@
         <div class="head-actions">
           <button class="btn icon-only ghost" id="multiSelectBtn" data-i18n-title="select_chats_tip" data-i18n-aria="select_chats_tip" title="Выбрать чаты" aria-label="Выбрать чаты" aria-pressed="false">
             <svg class="ico"><use href="#i-check-square"/></svg>
+          </button>
+          <button class="btn icon-only ghost" id="generateQuickBtn" data-i18n-title="gen_title" data-i18n-aria="gen_title" title="Сгенерировать диалог" aria-label="Сгенерировать диалог">
+            <svg class="ico"><use href="#i-sparkles"/></svg>
           </button>
           <button class="btn icon-only ghost" id="importQuickBtn" data-i18n-title="import_k1tty" data-i18n-aria="import_k1tty" title="Импорт .k1tty" aria-label="Импорт .k1tty">
             <svg class="ico"><use href="#i-upload"/></svg>
@@ -178,17 +183,45 @@
       </div>
 
       <div class="drawer-foot">
-        <a class="drawer-tg" href="https://t.me/k1ttyfthoughts" target="_blank" rel="noopener" data-i18n-title="tg_channel" title="Telegram-канал">
-          <img src="/static/icons/telegram.svg" alt="Telegram">
-          <span>@k1ttyfthoughts</span>
-          <svg class="ico drawer-tg-ext"><use href="#i-external"/></svg>
-        </a>
-        <button type="button" class="btn icon-only ghost" id="appearanceBtn" title="Настройки" aria-label="Настройки" aria-haspopup="dialog">
-          <svg class="ico" aria-hidden="true"><use href="#i-sliders"/></svg>
-        </button>
-        <button class="btn icon-only ghost" id="openWelcomeBtn" data-i18n-title="about" data-i18n-aria="about" title="О K1tty Tools" aria-label="О K1tty Tools">
-          <svg class="ico"><use href="#i-info"/></svg>
-        </button>
+        <div class="drawer-tg-ticker">
+          <img class="drawer-tg-logo" src="/static/icons/telegram.svg" alt="Telegram">
+          <div class="drawer-tg-viewport">
+            <div class="drawer-tg-track">
+              <div class="drawer-tg-group">
+                <a class="drawer-tg" href="https://t.me/k1ttyfthoughts" target="_blank" rel="noopener" data-i18n-title="tg_channel" title="Telegram-канал">
+                  <span>@k1ttyfthoughts</span>
+                  <svg class="ico drawer-tg-ext"><use href="#i-external"/></svg>
+                </a>
+                <span class="drawer-tg-sep" aria-hidden="true"></span>
+                <a class="drawer-tg" href="https://t.me/nepofiksili" target="_blank" rel="noopener" data-i18n-title="tg_channel" title="Telegram-канал">
+                  <span>@nepofiksili</span>
+                  <svg class="ico drawer-tg-ext"><use href="#i-external"/></svg>
+                </a>
+                <span class="drawer-tg-sep" aria-hidden="true"></span>
+              </div>
+              <div class="drawer-tg-group" aria-hidden="true">
+                <a class="drawer-tg" href="https://t.me/k1ttyfthoughts" target="_blank" rel="noopener" tabindex="-1" data-i18n-title="tg_channel" title="Telegram-канал">
+                  <span>@k1ttyfthoughts</span>
+                  <svg class="ico drawer-tg-ext"><use href="#i-external"/></svg>
+                </a>
+                <span class="drawer-tg-sep" aria-hidden="true"></span>
+                <a class="drawer-tg" href="https://t.me/nepofiksili" target="_blank" rel="noopener" tabindex="-1" data-i18n-title="tg_channel" title="Telegram-канал">
+                  <span>@nepofiksili</span>
+                  <svg class="ico drawer-tg-ext"><use href="#i-external"/></svg>
+                </a>
+                <span class="drawer-tg-sep" aria-hidden="true"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="drawer-foot-actions">
+          <button type="button" class="btn icon-only ghost" id="appearanceBtn" title="Настройки" aria-label="Настройки" aria-haspopup="dialog">
+            <svg class="ico" aria-hidden="true"><use href="#i-sliders"/></svg>
+          </button>
+          <button class="btn icon-only ghost" id="openWelcomeBtn" data-i18n-title="about" data-i18n-aria="about" title="О K1tty Tools" aria-label="О K1tty Tools">
+            <svg class="ico"><use href="#i-info"/></svg>
+          </button>
+        </div>
       </div>
     </div>
   </aside>
@@ -287,6 +320,10 @@
               <p class="ov-sub" data-i18n="ov_sub">Диалоги Antigravity, Antigravity CLI, Codex, Claude и OpenCode на этом диске</p>
             </div>
             <div class="ov-head-actions">
+              <button class="btn primary" id="ovGenerateBtn">
+                <svg class="ico"><use href="#i-sparkles"/></svg>
+                <span data-i18n="gen_btn_open">Сгенерировать диалог</span>
+              </button>
               <button class="btn" id="ovImportBtn">
                 <svg class="ico"><use href="#i-upload"/></svg>
                 <span data-i18n="import_short">Импорт</span>
@@ -402,6 +439,7 @@
         <div class="thread-find-bar hidden" id="threadSearchBar" role="search">
           <svg class="ico thread-find-ico"><use href="#i-search"/></svg>
           <input type="text" id="threadSearchInput" class="thread-find-input" data-i18n-placeholder="find_in_chat_ph" placeholder="Поиск по всему диалогу" autocomplete="off" spellcheck="false">
+          <button type="button" class="btn icon-only ghost sm thread-find-opt" id="threadSearchWordBtn" aria-pressed="false" data-i18n-aria="find_whole_word" data-i18n-title="find_whole_word" title="Точное слово"><span>W</span></button>
           <span class="thread-find-count" id="threadSearchCount"></span>
           <button type="button" class="btn icon-only ghost sm" id="threadSearchPrev" data-i18n-aria="prev_match" aria-label="Предыдущее">
             <svg class="ico"><use href="#i-chev-up"/></svg>
@@ -416,6 +454,7 @@
 
         
         <div class="thread-transition-overlay" id="threadTransitionOverlay" aria-hidden="true">
+          <div class="thread-load-rail" aria-hidden="true"><span class="thread-load-bar"></span></div>
           <div class="thread-transition-indicator" role="status" aria-live="polite">
             <svg class="ico thread-transition-spinner" aria-hidden="true"><use href="#i-loader"/></svg>
             <span data-i18n="loading">Загрузка</span>
@@ -426,6 +465,7 @@
           <div class="feed-inner">
             <div class="more-bar" id="moreWrap"></div>
             <div class="feed" id="chatFeed"></div>
+            <div class="newer-bar hidden" id="newerWrap"></div>
 
             <article class="unlocker-inline hidden" id="unlockerCard" aria-label="K1tty Tools Chat Unlocker">
               <div class="msg-head">
@@ -854,6 +894,320 @@
   </div>
 </div>
 
+<div class="modal-bg" id="generateModal">
+  <div class="modal gen-modal" role="dialog" aria-modal="true" aria-labelledby="genModalTitle">
+    <div class="modal-head">
+      <div class="modal-title-wrap">
+        <svg class="ico gen-head-ico"><use href="#i-sparkles"/></svg>
+        <h3 id="genModalTitle" data-i18n="gen_title">Сгенерировать диалог</h3>
+      </div>
+      <div class="gen-head-right">
+        <div class="gen-head-tabs" id="genStepsPill" role="tablist">
+          <button type="button" class="gen-tab-btn active" data-gen-step="1" role="tab" aria-selected="true" data-i18n="gen_step_setup">Настройка</button>
+          <button type="button" class="gen-tab-btn" data-gen-step="2" role="tab" aria-selected="false" data-i18n="gen_step_preview" disabled>Предпросмотр</button>
+          <button type="button" class="gen-tab-btn gen-drafts-btn" id="genDraftsBtn" role="tab" aria-selected="false" data-i18n-title="gen_drafts_title" title="Сохраненные генерации">
+            <span data-i18n="gen_drafts_btn">Сохраненные</span>
+            <span class="gen-drafts-count hidden" id="genDraftsCount">0</span>
+          </button>
+        </div>
+        <button class="btn icon-only ghost" data-close="generateModal" data-i18n-aria="close" aria-label="Закрыть"><svg class="ico"><use href="#i-x"/></svg></button>
+      </div>
+    </div>
+
+    <div class="gen-body">
+      <div class="gen-stage" id="genStageConfig">
+        <div class="gen-resume-bar hidden" id="genResumeBar">
+          <div class="gen-resume-copy">
+            <span class="gen-resume-label" data-i18n="gen_resume_label">Есть сгенерированный диалог</span>
+            <span class="gen-resume-title" id="genResumeTitle"></span>
+          </div>
+          <button type="button" class="btn sm primary" id="genResumeBtn" data-i18n="gen_resume_btn">Открыть предпросмотр</button>
+        </div>
+        <div class="gen-card gen-api-card" id="genApiCard">
+          <div class="gen-seg gen-provider-seg" id="genProviderSeg" role="radiogroup">
+            <button type="button" class="gen-seg-btn active" data-api-prov="openrouter" role="radio" aria-checked="true">
+              <span>OpenRouter</span>
+              <span class="gen-free-tag" data-i18n="gen_free_badge">Free</span>
+            </button>
+            <button type="button" class="gen-seg-btn" data-api-prov="deepseek" role="radio" aria-checked="false">
+              <span>DeepSeek</span>
+            </button>
+            <button type="button" class="gen-seg-btn" data-api-prov="custom" role="radio" aria-checked="false">
+              <span data-i18n="gen_prov_custom">Custom API</span>
+            </button>
+          </div>
+          <div class="gen-api-bar">
+            <div class="gen-api-status">
+              <svg class="ico"><use href="#i-key"/></svg>
+              <span class="gen-api-label" id="genApiLabel" data-i18n="gen_api_key_lbl">API-ключ</span>
+              <span class="gen-key-mask" id="genKeyMask"></span>
+            </div>
+            <div class="gen-api-actions">
+              <button type="button" class="btn sm ghost" id="genEditKeyBtn" data-i18n="gen_edit_key">Изменить</button>
+              <button type="button" class="btn sm ghost" id="genRefreshModelsBtn" data-i18n-title="gen_refresh_models" title="Обновить список моделей">
+                <svg class="ico"><use href="#i-refresh"/></svg>
+                <span data-i18n="gen_models_refresh_short">Модели</span>
+              </button>
+            </div>
+          </div>
+          <div class="gen-api-editor hidden" id="genApiEditor">
+            <div class="gen-field hidden" id="genBaseUrlRow">
+              <label class="field-label" for="genBaseUrlInput" data-i18n="gen_base_url_lbl">Base URL (OpenAI-совместимый)</label>
+              <input id="genBaseUrlInput" class="text-input gen-mono-input" type="url" autocomplete="off" spellcheck="false" placeholder="http://localhost:11434/v1">
+            </div>
+            <div class="gen-input-group">
+              <input id="genApiKeyInput" class="text-input gen-mono-input" type="password" autocomplete="off" spellcheck="false" placeholder="sk-...">
+              <button type="button" class="btn icon-only ghost" id="genKeyVisBtn" data-i18n-aria="gen_toggle_key_vis" aria-label="Показать ключ">
+                <svg class="ico" id="genKeyVisIco"><use href="#i-eye"/></svg>
+              </button>
+              <button type="button" class="btn sm primary" id="genSaveKeyBtn" data-i18n="gen_save_check">Сохранить</button>
+              <button type="button" class="btn sm ghost hidden" id="genClearKeyBtn" data-i18n="gen_clear_key">Удалить</button>
+            </div>
+            <div class="gen-hint" id="genApiHint"></div>
+          </div>
+        </div>
+
+        <div class="gen-field" id="genModelField">
+          <div class="gen-label-row">
+            <label class="field-label" for="genModelInput" data-i18n="gen_model_lbl">Модель</label>
+            <button type="button" class="gen-free-filter active" id="genFreeOnlyBtn" aria-pressed="true" data-i18n="gen_free_only_btn">Только бесплатные</button>
+          </div>
+          <div class="gen-model-combo" id="genModelCombo">
+            <input id="genModelInput" class="text-input gen-mono-input gen-model-input" type="text" autocomplete="off" spellcheck="false" data-i18n-placeholder="gen_model_ph" placeholder="Выберите или введите ID модели...">
+            <button type="button" class="gen-model-drop-btn" id="genModelDropBtn" data-i18n-aria="gen_model_list_aria" aria-label="Список моделей" aria-expanded="false">
+              <svg class="ico"><use href="#i-chev-down"/></svg>
+            </button>
+            <div class="gen-model-dropdown hidden" id="genModelDropdown" role="listbox"></div>
+          </div>
+        </div>
+
+        <div class="gen-row-2">
+          <div class="gen-field">
+            <div class="field-label" data-i18n="gen_effort_lbl">Уровень размышлений (Effort)</div>
+            <div class="gen-seg" id="genEffortSeg" role="radiogroup">
+              <button type="button" class="gen-seg-btn" data-effort="off" role="radio" aria-checked="false">Off</button>
+              <button type="button" class="gen-seg-btn active" data-effort="low" role="radio" aria-checked="true">Low</button>
+              <button type="button" class="gen-seg-btn" data-effort="high" role="radio" aria-checked="false">High</button>
+              <button type="button" class="gen-seg-btn" data-effort="max" role="radio" aria-checked="false">Max</button>
+            </div>
+          </div>
+          <div class="gen-field">
+            <div class="gen-label-row">
+              <label class="field-label" for="genTempRange" data-i18n="gen_temp_lbl">Температура</label>
+              <span class="gen-temp-val" id="genTempVal">0.7</span>
+            </div>
+            <div class="gen-temp-wrap">
+              <input id="genTempRange" class="gen-range" type="range" min="0" max="1.4" step="0.1" value="0.7">
+            </div>
+          </div>
+        </div>
+
+        <div class="gen-card gen-folder-card">
+          <div class="gen-card-head">
+            <div class="gen-card-head-copy">
+              <span class="gen-card-title" data-i18n="gen_context_mode_lbl">Контекст проекта</span>
+              <span class="gen-card-sub" data-i18n="gen_context_mode_sub">Привязка к папке на рабочем столе или чистое общение на тему</span>
+            </div>
+            <div class="gen-seg gen-seg-compact" id="genFolderModeSeg" role="radiogroup">
+              <button type="button" class="gen-seg-btn active" data-folder-mode="folder" role="radio" aria-checked="true" data-i18n="gen_mode_folder">С папкой</button>
+              <button type="button" class="gen-seg-btn" data-folder-mode="plain" role="radio" aria-checked="false" data-i18n="gen_mode_plain">Без папки</button>
+            </div>
+          </div>
+          <div class="gen-folder-body" id="genFolderBody">
+            <div class="gen-input-group">
+              <input id="genFolderInput" class="text-input gen-mono-input" type="text" spellcheck="false" data-i18n-placeholder="gen_folder_ph" placeholder="Путь к папке на рабочем столе">
+              <button type="button" class="btn sm ghost" id="genFolderDesktopBtn" data-i18n-title="gen_desktop_reset_tip" title="Подставить рабочий стол" data-i18n="gen_desktop_short">Desktop</button>
+              <button type="button" class="btn icon-only ghost" id="genFolderPickBtn" data-i18n-title="gen_pick_folder_tip" data-i18n-aria="gen_pick_folder_tip" title="Выбрать папку" aria-label="Выбрать папку">
+                <svg class="ico"><use href="#i-folder"/></svg>
+              </button>
+            </div>
+            <div class="gen-hint" data-i18n="gen_folder_hint">По умолчанию подставляется рабочий стол. Можно указать любую папку проекта.</div>
+          </div>
+        </div>
+
+        <div class="gen-field">
+          <label class="field-label" for="genTopicInput" data-i18n="gen_topic_lbl">Сценарий и тема диалога</label>
+          <textarea id="genTopicInput" class="textarea gen-topic-ta" rows="4" spellcheck="false" data-i18n-placeholder="gen_topic_ph" placeholder="Опишите, о чем должно было быть общение с ИИ: тема, задачи, тон, ключевые шаги контекста..."></textarea>
+        </div>
+
+        <div class="gen-row-2">
+          <div class="gen-field">
+            <div class="field-label" data-i18n="gen_length_lbl">Объем диалога</div>
+            <div class="gen-seg" id="genLengthSeg" role="radiogroup">
+              <button type="button" class="gen-seg-btn" data-length="short" role="radio" aria-checked="false" data-i18n="gen_len_short">Короткий</button>
+              <button type="button" class="gen-seg-btn active" data-length="medium" role="radio" aria-checked="true" data-i18n="gen_len_medium">Средний</button>
+              <button type="button" class="gen-seg-btn" data-length="long" role="radio" aria-checked="false" data-i18n="gen_len_long">Длинный</button>
+              <button type="button" class="gen-seg-btn" data-length="custom" role="radio" aria-checked="false" data-i18n="gen_len_custom">Свой</button>
+            </div>
+            <div class="gen-turns-row hidden" id="genCustomTurnsWrap">
+              <label for="genCustomTurnsInput" data-i18n="gen_turns_lbl">Обменов (пар сообщений):</label>
+              <input id="genCustomTurnsInput" class="text-input gen-turns-input" type="number" min="1" max="30" value="6">
+            </div>
+          </div>
+          <div class="gen-field">
+            <label class="field-label" for="genLangSelect" data-i18n="gen_lang_lbl">Язык диалога</label>
+            <select id="genLangSelect" class="gen-select">
+              <option value="auto" data-i18n="gen_lang_auto">Авто (по описанию)</option>
+              <option value="ru">Русский</option>
+              <option value="en">English</option>
+              <option value="uk">Українська</option>
+            </select>
+          </div>
+        </div>
+
+        <label class="backup-setting gen-switch-row" id="genToolsSwitchWrap">
+          <span class="backup-setting-copy">
+            <span class="backup-setting-title" data-i18n="gen_tools_lbl">Добавить шаги инструментов и thinking</span>
+            <span class="backup-setting-hint" data-i18n="gen_tools_hint">Генерирует реалистичные вызовы инструментов (tool_use / tool_result) и блоки размышлений</span>
+          </span>
+          <input type="checkbox" role="switch" id="genIncludeToolsToggle" checked>
+          <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
+        </label>
+
+        <details class="gen-advanced" id="genAdvancedDetails">
+          <summary class="gen-advanced-sum">
+            <span data-i18n="gen_advanced_lbl">Системный промпт и доп. настройки</span>
+            <span class="gen-custom-badge hidden" id="genCustomPromptBadge" data-i18n="gen_custom_badge">Изменен</span>
+          </summary>
+          <div class="gen-advanced-body">
+            <div class="gen-field">
+              <div class="gen-label-row">
+                <label class="field-label" for="genSystemTemplateInput" data-i18n="gen_sys_template_lbl">Системный промпт генератора</label>
+                <button type="button" class="btn xs ghost" id="genResetPromptBtn" data-i18n="gen_reset_prompt">Сбросить</button>
+              </div>
+              <textarea id="genSystemTemplateInput" class="textarea textarea-sm gen-prompt-ta" rows="4" spellcheck="false" data-i18n-placeholder="gen_sys_template_ph" placeholder="Инструкции для модели-генератора..."></textarea>
+              <details class="gen-contract-box" id="genJsonContractDetails">
+                <summary class="gen-contract-sum">
+                  <svg class="ico"><use href="#i-lock"/></svg>
+                  <span data-i18n="gen_contract_summary">Обязательный JSON-формат (добавляется автоматически)</span>
+                </summary>
+                <pre class="gen-contract-pre" id="genJsonContractPreview"></pre>
+              </details>
+            </div>
+            <div class="gen-field">
+              <label class="field-label" for="genTitleInput" data-i18n="gen_opt_title_lbl">Название чата (необязательно)</label>
+              <input id="genTitleInput" class="text-input" type="text" spellcheck="false" data-i18n-placeholder="gen_opt_title_ph" placeholder="Сгенерируется автоматически, если оставить пустым">
+            </div>
+            <div class="gen-field">
+              <label class="field-label" for="genSysPromptInput" data-i18n="gen_sys_prompt_lbl">Системный промпт внутри чата (необязательно)</label>
+              <textarea id="genSysPromptInput" class="textarea textarea-sm" rows="2" spellcheck="false" data-i18n-placeholder="gen_sys_prompt_ph" placeholder="Внутренние инструкции, которые добавятся в начало сохраненного чата"></textarea>
+            </div>
+          </div>
+        </details>
+
+        <div class="gen-field">
+          <div class="field-label" data-i18n="gen_target_lbl">Целевая площадка для сохранения</div>
+          <div class="prov-pick-grid gen-prov-grid" id="genTargetGrid"></div>
+        </div>
+
+        <div class="import-error hidden" id="genError" role="alert">
+          <strong data-i18n="gen_error_title">Ошибка генерации</strong>
+          <div id="genErrorDetails"></div>
+        </div>
+      </div>
+
+      <div class="gen-stage gen-loading-stage hidden" id="genStageLoading">
+        <div class="gen-run-card">
+          <div class="gen-run-rail" aria-hidden="true"><span class="gen-run-bar"></span></div>
+          <div class="gen-run-head">
+            <div class="gen-run-status">
+              <span class="gen-run-dot" aria-hidden="true"></span>
+              <div class="gen-run-copy">
+                <h4 class="gen-loading-title" id="genLoadingTitle" data-i18n="gen_loading_title">Генерация диалога</h4>
+                <p class="gen-loading-sub" id="genLoadingMeta"></p>
+              </div>
+            </div>
+            <span class="gen-loading-timer" id="genLoadingTimer">00:00</span>
+          </div>
+        </div>
+        <div class="gen-run-preview" aria-hidden="true">
+          <div class="gen-skel-card gen-skel-user">
+            <div class="gen-skel-head"><span class="gen-skel-chip"></span><span class="gen-skel-meta"></span></div>
+            <div class="gen-skel-line gen-skel-w70"></div>
+            <div class="gen-skel-line gen-skel-w45"></div>
+          </div>
+          <div class="gen-skel-card gen-skel-asst">
+            <div class="gen-skel-head"><span class="gen-skel-chip accent"></span><span class="gen-skel-meta"></span></div>
+            <div class="gen-skel-line gen-skel-w92"></div>
+            <div class="gen-skel-line gen-skel-w84"></div>
+            <div class="gen-skel-line gen-skel-w62"></div>
+          </div>
+          <div class="gen-skel-card gen-skel-user">
+            <div class="gen-skel-head"><span class="gen-skel-chip"></span><span class="gen-skel-meta"></span></div>
+            <div class="gen-skel-line gen-skel-w55"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="gen-stage hidden" id="genStagePreview">
+        <div class="gen-preview-head">
+          <div class="gen-field gen-preview-title-wrap">
+            <label class="field-label" for="genPreviewTitleInput" data-i18n="chat_title_lbl">Название чата</label>
+            <input id="genPreviewTitleInput" class="text-input" type="text" spellcheck="false">
+          </div>
+          <div class="gen-preview-stats" id="genPreviewStats"></div>
+        </div>
+
+        <div class="gen-preview-list" id="genPreviewList"></div>
+
+        <div class="gen-preview-save-box">
+          <div class="field-label" data-i18n="gen_target_lbl">Целевая площадка для сохранения</div>
+          <div class="prov-pick-grid gen-prov-grid" id="genPreviewTargetGrid"></div>
+          <label class="check-row">
+            <input type="checkbox" id="genPreviewIncludeTools" checked>
+            <span class="check-control" aria-hidden="true"></span>
+            <span data-i18n="include_service_steps">Включить служебные шаги</span>
+          </label>
+        </div>
+
+        <div class="import-error hidden" id="genPreviewError" role="alert">
+          <strong data-i18n="gen_save_failed">Не удалось сохранить диалог</strong>
+          <div id="genPreviewErrorDetails"></div>
+        </div>
+      </div>
+
+      <div class="gen-stage hidden" id="genStageDrafts">
+        <div class="gen-drafts-head">
+          <div>
+            <h4 class="gen-drafts-title" data-i18n="gen_drafts_title">Сохраненные генерации</h4>
+            <p class="gen-drafts-sub" data-i18n="gen_drafts_sub">Каждый сгенерированный диалог сохраняется автоматически и не пропадает при закрытии окна.</p>
+          </div>
+          <button type="button" class="btn sm" id="genDraftsBackBtn">
+            <svg class="ico"><use href="#i-arrow-left"/></svg>
+            <span data-i18n="gen_back_btn">Назад</span>
+          </button>
+        </div>
+        <div class="gen-drafts-list" id="genDraftsList"></div>
+      </div>
+    </div>
+
+    <div class="modal-foot" id="genFootConfig">
+      <div class="spacer"></div>
+      <button type="button" class="btn" data-close="generateModal" data-i18n="cancel">Отмена</button>
+      <button type="button" class="btn primary" id="genRunBtn">
+        <svg class="ico"><use href="#i-sparkles"/></svg>
+        <span data-i18n="gen_run_btn">Сгенерировать</span>
+      </button>
+    </div>
+
+    <div class="modal-foot hidden" id="genFootPreview">
+      <button type="button" class="btn" id="genBackBtn">
+        <svg class="ico"><use href="#i-arrow-left"/></svg>
+        <span data-i18n="gen_back_btn">Назад</span>
+      </button>
+      <button type="button" class="btn" id="genRegenBtn">
+        <svg class="ico"><use href="#i-refresh"/></svg>
+        <span data-i18n="gen_regen_btn">Перегенерировать</span>
+      </button>
+      <div class="spacer"></div>
+      <button type="button" class="btn primary" id="genSaveBtn">
+        <svg class="ico"><use href="#i-check"/></svg>
+        <span id="genSaveBtnLabel" data-i18n="gen_save_btn">Сохранить диалог</span>
+      </button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-bg cmd-bg" id="cmdPaletteModal">
   <div class="modal cmd-sheet" role="dialog" aria-modal="true" aria-label="Command Palette">
     <div class="cmd-input-wrap">
@@ -871,7 +1225,7 @@
       <div class="welcome-brand-pill">
         <svg class="welcome-brand-ico" aria-hidden="true"><use href="#i-brand"/></svg>
         <span>K1tty Tools</span>
-        <span class="welcome-ver">v2.0</span>
+        <span class="welcome-ver">v2.1</span>
       </div>
       <div class="welcome-dots" aria-hidden="true">
         <span class="welcome-dot active" data-welcome-dot="1"></span>
@@ -933,14 +1287,24 @@
 
         <div class="welcome-theme-grid" id="welcomeThemeGrid" role="radiogroup"></div>
 
-        <a class="welcome-tg" href="https://t.me/k1ttyfthoughts" target="_blank" rel="noopener">
-          <img class="welcome-tg-ico" src="/static/icons/telegram.svg" alt="Telegram">
-          <span class="welcome-tg-info">
-            <span class="welcome-tg-label" data-i18n="tg_channel">Telegram-канал</span>
-            <span class="welcome-tg-handle">@k1ttyfthoughts</span>
-          </span>
-          <svg class="ico welcome-tg-arrow"><use href="#i-external"/></svg>
-        </a>
+        <div class="welcome-tg-list">
+          <a class="welcome-tg" href="https://t.me/k1ttyfthoughts" target="_blank" rel="noopener">
+            <img class="welcome-tg-ico" src="/static/icons/telegram.svg" alt="Telegram">
+            <span class="welcome-tg-info">
+              <span class="welcome-tg-label" data-i18n="tg_channel">Telegram-канал</span>
+              <span class="welcome-tg-handle">@k1ttyfthoughts</span>
+            </span>
+            <svg class="ico welcome-tg-arrow"><use href="#i-external"/></svg>
+          </a>
+          <a class="welcome-tg" href="https://t.me/nepofiksili" target="_blank" rel="noopener">
+            <img class="welcome-tg-ico" src="/static/icons/telegram.svg" alt="Telegram">
+            <span class="welcome-tg-info">
+              <span class="welcome-tg-label" data-i18n="tg_channel">Telegram-канал</span>
+              <span class="welcome-tg-handle">@nepofiksili</span>
+            </span>
+            <svg class="ico welcome-tg-arrow"><use href="#i-external"/></svg>
+          </a>
+        </div>
 
         <div class="welcome-step2-actions">
           <button type="button" class="btn welcome-back-btn" id="welcomeBackBtn">

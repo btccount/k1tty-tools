@@ -1,16 +1,16 @@
 use crate::{
-    converter, pack, process,
-    provider::{required, valid_id, OpContext, Provider, ProviderPaths},
+    converter, deepseek, pack, process,
+    provider::{floor_char_boundary, required, valid_id, OpContext, Provider, ProviderPaths},
     storage,
 };
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Map, Value};
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
     fs,
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc, Mutex,
     },
     thread,
@@ -181,12 +181,16 @@ pub struct Service {
     providers: BTreeMap<String, Arc<dyn Provider>>,
     locks: BTreeMap<String, Mutex<()>>,
     settings: Mutex<Value>,
+    data_dir: PathBuf,
     settings_path: PathBuf,
     emit: EventSink,
     view: Mutex<Option<(String, String)>>,
     downloads: Mutex<BTreeMap<String, CachedPack>>,
     uploads: Mutex<BTreeMap<String, CachedPack>>,
     active_jobs: AtomicUsize,
+    thread_search_gen: AtomicU64,
+    global_search_gen: AtomicU64,
+    context_stats_cache: Arc<Mutex<HashMap<(String, String), (String, Value)>>>,
     boot_id: String,
 }
 
@@ -235,12 +239,16 @@ impl Service {
             settings: Mutex::new(
                 json!({"auto_backup":auto_backup,"auto_restart_hub":auto_restart_hub}),
             ),
+            data_dir: paths.data_dir,
             settings_path,
             emit,
             view: Mutex::new(None),
             downloads: Mutex::new(BTreeMap::new()),
             uploads: Mutex::new(BTreeMap::new()),
             active_jobs: AtomicUsize::new(0),
+            thread_search_gen: AtomicU64::new(0),
+            global_search_gen: AtomicU64::new(0),
+            context_stats_cache: Arc::new(Mutex::new(HashMap::new())),
             boot_id: uuid::Uuid::new_v4().simple().to_string(),
         }))
     }
@@ -327,8 +335,62 @@ impl Service {
                             }
                         }
                     }
+                    let ctx = self.context();
+                    let mut delta = Map::new();
+                    for ag_id in ["antigravity", "antigravity_cli"] {
+                        if let Ok(prov) = self.provider(ag_id) {
+                            if let Ok(st) = prov.call("state", &json!({}), &ctx) {
+                                delta.insert(ag_id.into(), st);
+                            }
+                        }
+                    }
+                    if !delta.is_empty() {
+                        (self.emit)(json!({"type":"procs","providers":delta}));
+                    }
                 }
                 return Ok(json!({"settings":snap}));
+            }
+            "deepseek_config" | "generator_config" => {
+                return Ok(deepseek::public_config(&self.data_dir))
+            }
+            "deepseek_save_config" | "generator_save_config" => {
+                return deepseek::save_config(&self.data_dir, &data)
+            }
+            "deepseek_models" | "generator_models" => {
+                return deepseek::fetch_models(&self.data_dir, &data);
+            }
+            "deepseek_generate" | "generator_generate" => {
+                let _op = self.active_operation();
+                return deepseek::generate_dialogue(&self.data_dir, &data);
+            }
+            "generator_drafts" => return deepseek::list_drafts(&self.data_dir),
+            "generator_load_draft" => {
+                return deepseek::load_draft(&self.data_dir, required(&data, "id")?);
+            }
+            "generator_save_draft" => return deepseek::save_draft(&self.data_dir, &data),
+            "generator_delete_draft" => {
+                return deepseek::delete_draft(&self.data_dir, required(&data, "id")?);
+            }
+            "deepseek_save_chat" | "generator_save_chat" => {
+                let target_id = data["target"]
+                    .as_str()
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or(pid);
+                let dst = self.provider(target_id)?;
+                dst.assert_writable(None)?;
+                let title = data["title"].as_str().filter(|s| !s.trim().is_empty());
+                let include_tools = data["include_tools"].as_bool().unwrap_or(true);
+                let doc = deepseek::prepare_doc_for_save(&data["doc"], title, include_tools)?;
+                let _op = self.active_operation();
+                let _guard = self.locks[target_id]
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
+                let result =
+                    converter::import_doc_to_provider(&doc, dst.as_ref(), title, include_tools)?;
+                if let Some(cid) = result["cid"].as_str().filter(|s| !s.is_empty()) {
+                    let _ = dst.after_external_import(cid, &self.context());
+                }
+                return Ok(json!({"ok":true,"result":result}));
             }
             "state" => {
                 process::snapshot_force(data["force"].as_bool().unwrap_or(false));
@@ -376,12 +438,19 @@ impl Service {
                 if raw_q.chars().count() < 2 {
                     return Ok(json!({"query": raw_q, "results": []}));
                 }
-                let q = raw_q.to_lowercase();
+                let whole_word = data["whole_word"].as_bool().unwrap_or(false);
+                let query = SearchQuery::with_options(raw_q, whole_word);
+                if query.is_empty() {
+                    return Ok(json!({"query": raw_q, "results": []}));
+                }
+                let search_gen = self.global_search_gen.fetch_add(1, Ordering::Relaxed) + 1;
                 let limit = data["limit"].as_u64().unwrap_or(40).clamp(1, 100) as usize;
                 let ctx = self.context();
                 let mut results = Vec::new();
                 for p in self.targets(pid)? {
-                    if results.len() >= limit {
+                    if results.len() >= limit
+                        || self.global_search_gen.load(Ordering::Relaxed) != search_gen
+                    {
                         break;
                     }
                     let id = p.paths().id.clone();
@@ -392,7 +461,9 @@ impl Service {
                         continue;
                     };
                     for conv in convs {
-                        if results.len() >= limit {
+                        if results.len() >= limit
+                            || self.global_search_gen.load(Ordering::Relaxed) != search_gen
+                        {
                             break;
                         }
                         let cid = conv["id"].as_str().unwrap_or("");
@@ -402,32 +473,41 @@ impl Service {
                         let title = conv["title"].as_str().unwrap_or("");
                         let mtime = conv["mtime"].as_str().unwrap_or("");
                         let mtime_ts = conv["mtime_ts"].as_f64().unwrap_or(0.0);
-                        let entries = collect_entries(p.as_ref(), cid, &ctx, 2);
+                        let title_hit = query.matches(title);
                         let mut hit_count = 0usize;
                         let mut first_key = String::new();
                         let mut first_kind = String::new();
-                        let mut first_snippet = String::new();
-                        for entry in &entries {
-                            let text = entry["text"].as_str().unwrap_or("");
-                            let label = entry["label"].as_str().unwrap_or("");
-                            if let Some(snip) = match_snippet(text, &q) {
-                                hit_count += 1;
-                                if first_snippet.is_empty() {
-                                    first_key = entry["key"].as_str().unwrap_or("").to_owned();
-                                    first_kind = entry["kind"].as_str().unwrap_or("").to_owned();
-                                    first_snippet = snip;
-                                }
-                            } else if !label.is_empty() && label.to_lowercase().contains(&q) {
-                                hit_count += 1;
-                                if first_snippet.is_empty() {
-                                    first_key = entry["key"].as_str().unwrap_or("").to_owned();
-                                    first_kind = entry["kind"].as_str().unwrap_or("").to_owned();
-                                    first_snippet = trim_chars(label, 140);
-                                }
+                        let mut first_snippet: Option<String> = None;
+                        let mut aborted = false;
+                        let _ = p.visit_entries(cid, &mut |entry| {
+                            if self.global_search_gen.load(Ordering::Relaxed) != search_gen {
+                                aborted = true;
+                                return false;
                             }
+                            if first_snippet.is_none() {
+                                if let Some(snip) = query.snippet(entry.text) {
+                                    hit_count += 1;
+                                    first_key = entry.key.to_owned();
+                                    first_kind = entry.kind.to_owned();
+                                    first_snippet = Some(snip);
+                                } else if !entry.label.is_empty() && query.matches(entry.label) {
+                                    hit_count += 1;
+                                    first_key = entry.key.to_owned();
+                                    first_kind = entry.kind.to_owned();
+                                    first_snippet = Some(trim_chars(entry.label, 140));
+                                }
+                            } else if query.matches(entry.text)
+                                || (!entry.label.is_empty() && query.matches(entry.label))
+                            {
+                                hit_count += 1;
+                            }
+                            true
+                        });
+                        if aborted {
+                            return Ok(json!({"query": raw_q, "results": []}));
                         }
-                        let title_hit = title.to_lowercase().contains(&q);
                         if hit_count > 0 || title_hit {
+                            let snippet = first_snippet.unwrap_or_else(|| trim_chars(title, 140));
                             results.push(json!({
                                 "provider": id,
                                 "cid": cid,
@@ -436,11 +516,14 @@ impl Service {
                                 "mtime_ts": mtime_ts,
                                 "key": first_key,
                                 "kind": first_kind,
-                                "snippet": if first_snippet.is_empty() { trim_chars(title, 140) } else { first_snippet },
+                                "snippet": snippet,
                                 "hit_count": hit_count.max(usize::from(title_hit))
                             }));
                         }
                     }
+                }
+                if self.global_search_gen.load(Ordering::Relaxed) != search_gen {
+                    return Ok(json!({"query": raw_q, "results": []}));
                 }
                 results.sort_by(|a, b| {
                     b["mtime_ts"]
@@ -564,14 +647,18 @@ impl Service {
             let job_provider = dst.paths().id.clone();
             return self.start_job_as(ids, "convert_chat", job_provider, move |ctx| {
                 dst.assert_writable(None)?;
-                converter::convert_chat(
+                let result = converter::convert_chat(
                     p.as_ref(),
                     &cid,
                     dst.as_ref(),
                     data["title"].as_str().filter(|s| !s.trim().is_empty()),
                     data["include_tools"].as_bool().unwrap_or(false),
                     ctx,
-                )
+                )?;
+                if let Some(new_cid) = result["cid"].as_str().filter(|s| !s.is_empty()) {
+                    let _ = dst.after_external_import(new_cid, ctx);
+                }
+                Ok(result)
             });
         }
         if op == "delete_backup" {
@@ -583,45 +670,110 @@ impl Service {
                 storage::delete_backup(p.paths(), &bdir)
             });
         }
+        if op == "entry_text" {
+            let cid = required(&data, "cid")?;
+            let key = required(&data, "key")?;
+            let text = match p.read_entry_text(cid, key)? {
+                Some(text) => text,
+                None => {
+                    let preview = p.call(
+                        "edit_preview",
+                        &json!({"cid": cid, "key": key}),
+                        &self.context(),
+                    )?;
+                    preview["text"]
+                        .as_str()
+                        .context("Не удалось прочитать полный текст записи.")?
+                        .to_owned()
+                }
+            };
+            return Ok(json!({"ok": true, "key": key, "text": text}));
+        }
         if op == "search_thread" {
             let cid = required(&data, "cid")?;
             let raw_q = data["query"].as_str().unwrap_or("").trim();
-            if raw_q.is_empty() {
-                return Ok(json!({"query": raw_q, "total": 0, "matches": []}));
+            let include_tools = data["include_tools"].as_bool().unwrap_or(true);
+            let whole_word = data["whole_word"].as_bool().unwrap_or(false);
+            let query = SearchQuery::with_options(raw_q, whole_word);
+            if query.is_empty() {
+                return Ok(json!({
+                    "query": raw_q,
+                    "total": 0,
+                    "shown": 0,
+                    "truncated": false,
+                    "matches": []
+                }));
             }
-            let q = raw_q.to_lowercase();
-            let entries = collect_entries(p.as_ref(), cid, &self.context(), 8);
-            let mut matches = Vec::new();
-            for entry in &entries {
-                let text = entry["text"].as_str().unwrap_or("");
-                let label = entry["label"].as_str().unwrap_or("");
-                let snippet = match_snippet(text, &q).or_else(|| {
-                    if !label.is_empty() && label.to_lowercase().contains(&q) {
-                        Some(trim_chars(label, 140))
+            let search_gen = self.thread_search_gen.fetch_add(1, Ordering::Relaxed) + 1;
+            let mut matches = VecDeque::with_capacity(250);
+            let mut total_matches = 0usize;
+            let mut aborted = false;
+            p.visit_entries(cid, &mut |entry| {
+                if self.thread_search_gen.load(Ordering::Relaxed) != search_gen {
+                    aborted = true;
+                    return false;
+                }
+                if !include_tools && entry.kind == "tool" {
+                    return true;
+                }
+                let snippet = query.snippet(entry.text).or_else(|| {
+                    if !entry.label.is_empty() && query.matches(entry.label) {
+                        Some(trim_chars(entry.label, 140))
                     } else {
                         None
                     }
                 });
                 if let Some(snip) = snippet {
-                    matches.push(json!({
-                        "key": entry["key"],
-                        "kind": entry["kind"],
-                        "subtype": entry["subtype"],
-                        "label": entry["label"],
-                        "ts": entry["ts"],
+                    total_matches += 1;
+                    if matches.len() == 250 {
+                        matches.pop_front();
+                    }
+                    matches.push_back(json!({
+                        "key": entry.key,
+                        "kind": entry.kind,
+                        "subtype": entry.subtype,
+                        "label": entry.label,
+                        "ts": entry.ts,
                         "snippet": snip
                     }));
-                    if matches.len() >= 250 {
-                        break;
-                    }
                 }
+                true
+            })?;
+            if aborted || self.thread_search_gen.load(Ordering::Relaxed) != search_gen {
+                return Ok(json!({
+                    "query": raw_q,
+                    "total": 0,
+                    "shown": 0,
+                    "truncated": false,
+                    "matches": []
+                }));
             }
-            return Ok(json!({"query": raw_q, "total": matches.len(), "matches": matches}));
+            let shown = matches.len();
+            let out: Vec<Value> = matches.into_iter().collect();
+            return Ok(json!({
+                "query": raw_q,
+                "total": total_matches,
+                "shown": shown,
+                "truncated": total_matches > shown,
+                "matches": out
+            }));
         }
         if op == "context_stats" {
             let cid = required(&data, "cid")?;
-            let ctx = self.context();
-            let entries = collect_entries(p.as_ref(), cid, &ctx, 8);
+            let sig = p.content_signature(cid);
+            if let Some(s) = sig.as_deref() {
+                let cache = self
+                    .context_stats_cache
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
+                if let Some((cached_sig, cached_val)) = cache.get(&(pid.to_owned(), cid.to_owned()))
+                {
+                    if cached_sig == s {
+                        return Ok(cached_val.clone());
+                    }
+                }
+            }
+            let mut total_steps = 0usize;
             let mut total_bytes = 0usize;
             let mut dialogue_bytes = 0usize;
             let mut dialogue_steps = 0usize;
@@ -629,46 +781,47 @@ impl Service {
             let mut thinking_steps = 0usize;
             let mut tool_bytes = 0usize;
             let mut tool_steps = 0usize;
-            let mut ranked: Vec<(usize, Value)> = Vec::new();
-            for entry in &entries {
-                let text = entry["text"].as_str().unwrap_or("");
-                let kind = entry["kind"].as_str().unwrap_or("");
-                let subtype = entry["subtype"].as_str().unwrap_or("");
-                let label = entry["label"].as_str().unwrap_or("");
-                let bytes = text.len();
+            let mut top5: Vec<(usize, Value)> = Vec::with_capacity(6);
+            p.visit_entries(cid, &mut |entry| {
+                total_steps += 1;
+                let bytes = entry.text.len();
                 total_bytes += bytes;
-                if matches!(kind, "user" | "assistant") {
+                if matches!(entry.kind, "user" | "assistant") {
                     dialogue_bytes += bytes;
                     dialogue_steps += 1;
-                } else if subtype == "thinking" || label.eq_ignore_ascii_case("reasoning") {
+                } else if entry.subtype == "thinking"
+                    || entry.label.eq_ignore_ascii_case("reasoning")
+                {
                     thinking_bytes += bytes;
                     thinking_steps += 1;
-                } else if kind == "tool" {
+                } else if entry.kind == "tool" {
                     tool_bytes += bytes;
                     tool_steps += 1;
                 }
-                if bytes >= 512 {
-                    ranked.push((
-                        bytes,
-                        json!({
-                            "key": entry["key"],
-                            "kind": kind,
-                            "subtype": subtype,
-                            "label": label,
-                            "bytes": bytes,
-                            "tokens": (bytes + 3) / 4,
-                            "preview": trim_chars(&text.split_whitespace().collect::<Vec<_>>().join(" "), 110)
-                        }),
-                    ));
+                if bytes >= 512 && (top5.len() < 5 || bytes > top5.last().unwrap().0) {
+                    let row = json!({
+                        "key": entry.key,
+                        "kind": entry.kind,
+                        "subtype": entry.subtype,
+                        "label": entry.label,
+                        "bytes": bytes,
+                        "tokens": (bytes + 3) / 4,
+                        "preview": collapse_preview(entry.text, 110)
+                    });
+                    top5.push((bytes, row));
+                    top5.sort_by(|a, b| b.0.cmp(&a.0));
+                    if top5.len() > 5 {
+                        top5.truncate(5);
+                    }
                 }
-            }
-            ranked.sort_by(|a, b| b.0.cmp(&a.0));
-            let heaviest: Vec<Value> = ranked.into_iter().take(5).map(|(_, v)| v).collect();
+                true
+            })?;
+            let heaviest: Vec<Value> = top5.into_iter().map(|(_, v)| v).collect();
             let can_slim = matches!(pid, "claude" | "codex" | "opencode");
-            return Ok(json!({
+            let stats = json!({
                 "provider": pid,
                 "cid": cid,
-                "total_steps": entries.len(),
+                "total_steps": total_steps,
                 "total_bytes": total_bytes,
                 "total_tokens": (total_bytes + 3) / 4,
                 "dialogue_steps": dialogue_steps,
@@ -681,7 +834,18 @@ impl Service {
                 "tool_tokens": (tool_bytes + 3) / 4,
                 "can_slim": can_slim,
                 "heaviest": heaviest
-            }));
+            });
+            if let Some(s) = sig {
+                let mut cache = self
+                    .context_stats_cache
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
+                if cache.len() >= 64 {
+                    cache.clear();
+                }
+                cache.insert((pid.to_owned(), cid.to_owned()), (s, stats.clone()));
+            }
+            return Ok(stats);
         }
         if op == "preview_slim" && !matches!(pid, "claude" | "codex" | "opencode") {
             return Ok(json!({
@@ -744,9 +908,17 @@ impl Service {
                 x => x,
             };
             let op = op.to_owned();
+            let stats_cache = self.context_stats_cache.clone();
+            let pid_owned = pid.to_owned();
             return self.start_job(vec![pid.into()], name, move |ctx| {
-                p.assert_writable(target.as_deref())?;
-                p.call(&op, &data, ctx)
+                let res = p.call(&op, &data, ctx)?;
+                if let Some(cid) = target {
+                    stats_cache
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .remove(&(pid_owned, cid));
+                }
+                Ok(res)
             });
         }
         if op == "entries" {
@@ -946,6 +1118,9 @@ impl Service {
             title.filter(|s| !s.trim().is_empty()),
             include_tools,
         )?;
+        if let Some(cid) = result["cid"].as_str().filter(|s| !s.is_empty()) {
+            let _ = p.after_external_import(cid, &self.context());
+        }
         Ok(json!({"ok":true,"result":result}))
     }
 
@@ -954,13 +1129,17 @@ impl Service {
         thread::spawn(move || {
             let mut previous = process::ProcessMap::new();
             let mut previous_lock = None;
+            let mut previous_view: Option<(String, String)> = None;
+            let mut tick: u64 = 0;
             loop {
-                thread::sleep(Duration::from_secs(1));
+                thread::sleep(Duration::from_millis(2500));
+                tick = tick.wrapping_add(1);
                 let Some(service) = weak.upgrade() else {
                     break;
                 };
                 let current = process::snapshot_force(true);
-                if current != previous {
+                let procs_changed = current != previous;
+                if procs_changed {
                     let mut states = Map::new();
                     for (id, p) in &service.providers {
                         if current.get(id) != previous.get(id) {
@@ -980,26 +1159,35 @@ impl Service {
                     .unwrap_or_else(|e| e.into_inner())
                     .clone();
                 if let Some((id, cid)) = view {
-                    if let Some(lock) = service.locks.get(&id) {
-                        if let Ok(_guard) = lock.try_lock() {
-                            if let Ok(p) = service.provider(&id) {
-                                if let Ok(mut status) = p.lock_status(Some(&cid)) {
-                                    let next = (id.clone(), cid.clone(), status.clone());
-                                    if previous_lock.as_ref() != Some(&next) {
-                                        if let Some(obj) = status.as_object_mut() {
-                                            obj.insert("type".into(), json!("conv_lock"));
-                                            obj.insert("provider".into(), json!(id));
-                                            obj.insert("cid".into(), json!(cid));
-                                            (service.emit)(status);
+                    let view_changed = previous_view
+                        .as_ref()
+                        .is_none_or(|(p, c)| p != &id || c != &cid);
+                    let provider_running = previous.get(&id).is_some_and(|list| !list.is_empty());
+                    let heartbeat = tick % 4 == 0;
+                    if view_changed || procs_changed || provider_running || heartbeat {
+                        if let Some(lock) = service.locks.get(&id) {
+                            if let Ok(_guard) = lock.try_lock() {
+                                if let Ok(p) = service.provider(&id) {
+                                    if let Ok(mut status) = p.lock_status(Some(&cid)) {
+                                        let next = (id.clone(), cid.clone(), status.clone());
+                                        if previous_lock.as_ref() != Some(&next) {
+                                            if let Some(obj) = status.as_object_mut() {
+                                                obj.insert("type".into(), json!("conv_lock"));
+                                                obj.insert("provider".into(), json!(id));
+                                                obj.insert("cid".into(), json!(cid));
+                                                (service.emit)(status);
+                                            }
+                                            previous_lock = Some(next);
                                         }
-                                        previous_lock = Some(next);
                                     }
                                 }
+                                previous_view = Some((id, cid));
                             }
                         }
                     }
                 } else {
                     previous_lock = None;
+                    previous_view = None;
                 }
             }
         });
@@ -1029,48 +1217,6 @@ fn prune(cache: &mut BTreeMap<String, CachedPack>) {
     }
 }
 
-fn collect_entries(p: &dyn Provider, cid: &str, ctx: &OpContext, max_pages: usize) -> Vec<Value> {
-    let mut pages: Vec<Vec<Value>> = Vec::new();
-    let mut before: Option<String> = None;
-    for _ in 0..max_pages {
-        let mut req = json!({"cid": cid, "include_tools": true, "limit": 1500});
-        if let Some(cur) = &before {
-            req["before"] = json!(cur);
-        }
-        let Ok(resp) = p.call("entries", &req, ctx) else {
-            break;
-        };
-        let mut items = Vec::new();
-        if let Some(turns) = resp["turns"].as_array() {
-            for turn in turns {
-                if let Some(arr) = turn["items"].as_array() {
-                    items.extend(arr.iter().cloned());
-                }
-            }
-        } else if let Some(arr) = resp["entries"].as_array() {
-            items.extend(arr.iter().cloned());
-        }
-        if items.is_empty() {
-            break;
-        }
-        pages.push(items);
-        if resp["has_more"] != true {
-            break;
-        }
-        let next = resp["cursor"]
-            .as_str()
-            .or_else(|| resp["next_cursor"].as_str())
-            .unwrap_or("")
-            .to_owned();
-        if next.is_empty() || before.as_deref() == Some(next.as_str()) {
-            break;
-        }
-        before = Some(next);
-    }
-    pages.reverse();
-    pages.into_iter().flatten().collect()
-}
-
 fn trim_chars(s: &str, max: usize) -> String {
     let mut out = String::new();
     for (i, ch) in s.chars().enumerate() {
@@ -1083,36 +1229,367 @@ fn trim_chars(s: &str, max: usize) -> String {
     out
 }
 
-fn match_snippet(text: &str, needle_lower: &str) -> Option<String> {
+fn collapse_preview(text: &str, max_chars: usize) -> String {
+    let mut out = String::new();
+    let mut count = 0usize;
+    let mut first = true;
+    for word in text.split_whitespace() {
+        if !first {
+            if count >= max_chars {
+                out.push('…');
+                return out;
+            }
+            out.push(' ');
+            count += 1;
+        }
+        first = false;
+        for ch in word.chars() {
+            if count >= max_chars {
+                out.push('…');
+                return out;
+            }
+            out.push(ch);
+            count += 1;
+        }
+    }
+    out
+}
+
+struct SearchQuery {
+    ascii_tokens: Option<Vec<Vec<u8>>>,
+    unicode_tokens: Vec<Vec<char>>,
+    first_char_lower: char,
+    first_char_upper: Option<char>,
+    whole_word: bool,
+}
+
+fn is_word_char(ch: char) -> bool {
+    ch.is_alphanumeric() || ch == '_'
+}
+
+fn is_whole_word_match(text: &str, start: usize, end: usize) -> bool {
+    if start > 0 {
+        if let Some(prev) = text[..start].chars().next_back() {
+            if is_word_char(prev) {
+                return false;
+            }
+        }
+    }
+    if end < text.len() {
+        if let Some(next) = text[end..].chars().next() {
+            if is_word_char(next) {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+impl SearchQuery {
+    fn new(raw_q: &str) -> Self {
+        Self::with_options(raw_q, false)
+    }
+
+    fn with_options(raw_q: &str, whole_word: bool) -> Self {
+        let mut unicode_tokens = Vec::new();
+        for tok in raw_q.split_whitespace() {
+            let chars: Vec<char> = tok.to_lowercase().chars().collect();
+            if !chars.is_empty() {
+                unicode_tokens.push(chars);
+            }
+        }
+        if unicode_tokens.is_empty() {
+            return Self {
+                ascii_tokens: None,
+                unicode_tokens,
+                first_char_lower: '\0',
+                first_char_upper: None,
+                whole_word,
+            };
+        }
+        let ascii_tokens = if unicode_tokens.iter().all(|t| t.iter().all(char::is_ascii)) {
+            Some(
+                unicode_tokens
+                    .iter()
+                    .map(|t| t.iter().map(|&c| c as u8).collect())
+                    .collect(),
+            )
+        } else {
+            None
+        };
+        let first_char_lower = unicode_tokens[0][0];
+        let mut upper_it = first_char_lower.to_uppercase();
+        let u1 = upper_it.next();
+        let first_char_upper = if upper_it.next().is_none() { u1 } else { None };
+        Self {
+            ascii_tokens,
+            unicode_tokens,
+            first_char_lower,
+            first_char_upper,
+            whole_word,
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.unicode_tokens.is_empty()
+    }
+
+    fn find(&self, text: &str) -> Option<(usize, usize)> {
+        if self.unicode_tokens.is_empty() || text.is_empty() {
+            return None;
+        }
+        if let Some(tokens) = &self.ascii_tokens {
+            let bytes = text.as_bytes();
+            let first = &tokens[0];
+            let mut search_from = 0usize;
+            if tokens.len() == 1 {
+                while let Some((start, end)) = find_ascii_token(bytes, first, search_from) {
+                    if !self.whole_word || is_whole_word_match(text, start, end) {
+                        return Some((start, end));
+                    }
+                    search_from = start + 1;
+                }
+                return None;
+            }
+            while let Some((start, mut cur)) = find_ascii_token(bytes, first, search_from) {
+                let mut matched = true;
+                for tok in &tokens[1..] {
+                    let ws_start = cur;
+                    while cur < bytes.len() {
+                        let b = bytes[cur];
+                        if b < 0x80 {
+                            if b.is_ascii_whitespace() {
+                                cur += 1;
+                            } else {
+                                break;
+                            }
+                        } else {
+                            let Some(ch) = text[cur..].chars().next() else {
+                                break;
+                            };
+                            if ch.is_whitespace() {
+                                cur += ch.len_utf8();
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    if cur == ws_start
+                        || cur + tok.len() > bytes.len()
+                        || !bytes[cur..cur + tok.len()].eq_ignore_ascii_case(tok)
+                    {
+                        matched = false;
+                        break;
+                    }
+                    cur += tok.len();
+                }
+                if matched && (!self.whole_word || is_whole_word_match(text, start, cur)) {
+                    return Some((start, cur));
+                }
+                search_from = start + 1;
+            }
+            return None;
+        }
+        let mut search_from = 0usize;
+        while let Some((start, end)) = self.find_unicode_token(text, search_from) {
+            if !self.whole_word || is_whole_word_match(text, start, end) {
+                return Some((start, end));
+            }
+            let step = text[start..].chars().next().map_or(1, char::len_utf8);
+            search_from = start + step;
+        }
+        None
+    }
+
+    fn find_unicode_token(&self, text: &str, from: usize) -> Option<(usize, usize)> {
+        let bytes = text.as_bytes();
+        if from >= bytes.len() {
+            return None;
+        }
+        let first_lo = self.first_char_lower;
+        let first_hi = self.first_char_upper;
+        if first_lo.is_ascii() {
+            let lo = first_lo as u8;
+            let hi = lo.to_ascii_uppercase();
+            let mut pos = from;
+            while pos < bytes.len() {
+                let rel = if lo == hi {
+                    bytes[pos..].iter().position(|&b| b == lo)
+                } else {
+                    bytes[pos..].iter().position(|&b| b == lo || b == hi)
+                }?;
+                let idx = pos + rel;
+                if let Some(end) = match_unicode_tokens_at(text, idx, &self.unicode_tokens) {
+                    return Some((idx, end));
+                }
+                pos = idx + 1;
+            }
+            return None;
+        }
+        let mut i = from;
+        while i < bytes.len() {
+            if bytes[i] < 0x80 {
+                let rel = bytes[i..].iter().position(|&b| b >= 0x80)?;
+                i += rel;
+            }
+            let Some(ch) = text[i..].chars().next() else {
+                break;
+            };
+            let clen = ch.len_utf8();
+            let hit = ch == first_lo
+                || first_hi == Some(ch)
+                || (!ch.is_lowercase() && ch.to_lowercase().next() == Some(first_lo));
+            if hit {
+                if let Some(end) = match_unicode_tokens_at(text, i, &self.unicode_tokens) {
+                    return Some((i, end));
+                }
+            }
+            i += clen;
+        }
+        None
+    }
+
+    fn matches(&self, text: &str) -> bool {
+        self.find(text).is_some()
+    }
+
+    fn snippet(&self, text: &str) -> Option<String> {
+        let (match_start, match_end) = self.find(text)?;
+        Some(build_snippet(text, match_start, match_end))
+    }
+}
+
+fn find_ascii_token(hay: &[u8], needle: &[u8], from: usize) -> Option<(usize, usize)> {
+    let nlen = needle.len();
+    if nlen == 0 || from + nlen > hay.len() {
+        return None;
+    }
+    let first_lo = needle[0];
+    let first_hi = first_lo.to_ascii_uppercase();
+    let last = hay.len() - nlen;
+    let mut pos = from;
+    if first_lo == first_hi {
+        while let Some(rel) = hay[pos..=last].iter().position(|&b| b == first_lo) {
+            let idx = pos + rel;
+            if nlen == 1 || hay[idx + 1..idx + nlen].eq_ignore_ascii_case(&needle[1..]) {
+                return Some((idx, idx + nlen));
+            }
+            pos = idx + 1;
+        }
+    } else {
+        while let Some(rel) = hay[pos..=last]
+            .iter()
+            .position(|&b| b == first_lo || b == first_hi)
+        {
+            let idx = pos + rel;
+            if nlen == 1 || hay[idx + 1..idx + nlen].eq_ignore_ascii_case(&needle[1..]) {
+                return Some((idx, idx + nlen));
+            }
+            pos = idx + 1;
+        }
+    }
+    None
+}
+
+fn match_unicode_tokens_at(text: &str, start: usize, tokens: &[Vec<char>]) -> Option<usize> {
+    let mut iter = text[start..].char_indices().peekable();
+    for (ti, tok) in tokens.iter().enumerate() {
+        if ti > 0 {
+            let mut saw_ws = false;
+            while iter.peek().is_some_and(|(_, c)| c.is_whitespace()) {
+                iter.next();
+                saw_ws = true;
+            }
+            if !saw_ws {
+                return None;
+            }
+        }
+        let mut k = 0usize;
+        while k < tok.len() {
+            let (_, ch) = iter.next()?;
+            if ch.is_whitespace() {
+                return None;
+            }
+            if ch.is_ascii() {
+                if (ch as u8).to_ascii_lowercase() as char != tok[k] {
+                    return None;
+                }
+                k += 1;
+            } else if ch == tok[k] {
+                k += 1;
+            } else {
+                for lc in ch.to_lowercase() {
+                    if k >= tok.len() || lc != tok[k] {
+                        return None;
+                    }
+                    k += 1;
+                }
+            }
+        }
+    }
+    let end = iter
+        .peek()
+        .map(|(off, _)| start + *off)
+        .unwrap_or(text.len());
+    Some(end)
+}
+
+fn build_snippet(text: &str, match_start: usize, match_end: usize) -> String {
+    let win_start = floor_char_boundary(text, match_start.saturating_sub(256));
+    let win_end = floor_char_boundary(text, match_end.saturating_add(400).min(text.len()));
+    let window = &text[win_start..win_end];
+    let rel_start = match_start - win_start;
+    let rel_end = match_end - win_start;
+    let mut chars = Vec::with_capacity(window.len().min(700));
+    let mut in_ws = false;
+    let mut started = false;
+    let mut hit_start: Option<usize> = None;
+    let mut hit_end: Option<usize> = None;
+    for (off, ch) in window.char_indices() {
+        if hit_start.is_none() && off >= rel_start {
+            hit_start = Some(chars.len());
+        }
+        if hit_end.is_none() && off >= rel_end {
+            hit_end = Some(chars.len());
+        }
+        if ch.is_whitespace() {
+            if started && !in_ws {
+                chars.push(' ');
+                in_ws = true;
+            }
+        } else {
+            started = true;
+            in_ws = false;
+            chars.push(ch);
+        }
+    }
+    if chars.last() == Some(&' ') {
+        chars.pop();
+    }
+    let h_start = hit_start.unwrap_or(0).min(chars.len());
+    let h_end = hit_end.unwrap_or(chars.len()).min(chars.len());
+    let start = h_start.saturating_sub(42);
+    let end = (h_end + 72).min(chars.len());
+    let has_before = start > 0 || text[..win_start].chars().rev().any(|c| !c.is_whitespace());
+    let has_after = end < chars.len() || text[win_end..].chars().any(|c| !c.is_whitespace());
+    let mut out = String::with_capacity((end - start) * 2 + 6);
+    if has_before {
+        out.push('…');
+    }
+    for &ch in &chars[start..end] {
+        out.push(ch);
+    }
+    if has_after {
+        out.push('…');
+    }
+    out
+}
+
+pub fn match_snippet(text: &str, needle_lower: &str) -> Option<String> {
     if text.is_empty() || needle_lower.is_empty() {
         return None;
     }
-    let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    let chars: Vec<char> = flat.chars().collect();
-    let needle: Vec<char> = needle_lower.chars().collect();
-    if needle.len() > chars.len() {
-        return None;
-    }
-    let lowered: Vec<char> = chars
-        .iter()
-        .map(|c| c.to_lowercase().next().unwrap_or(*c))
-        .collect();
-    let pos = lowered
-        .windows(needle.len())
-        .position(|w| w == needle.as_slice())?;
-    let start = pos.saturating_sub(42);
-    let end = (pos + needle.len() + 72).min(chars.len());
-    let mut out = String::new();
-    if start > 0 {
-        out.push('…');
-    }
-    for ch in &chars[start..end] {
-        out.push(*ch);
-    }
-    if end < chars.len() {
-        out.push('…');
-    }
-    Some(out)
+    SearchQuery::new(needle_lower).snippet(text)
 }
 
 #[cfg(test)]
@@ -1183,5 +1660,49 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("unique_needle_alpha"));
+    }
+
+    #[test]
+    fn match_snippet_handles_ascii_cyrillic_multiword_and_giant_non_match() {
+        assert_eq!(match_snippet("", "abc"), None);
+        assert_eq!(match_snippet("abc", ""), None);
+        assert_eq!(match_snippet("abc", "   "), None);
+
+        let ascii_hit = match_snippet("Prefix\n\t  Alpha   BETA  gamma  suffix", "alpha beta")
+            .expect("ascii multi-word hit");
+        assert_eq!(ascii_hit, "Prefix Alpha BETA gamma suffix");
+
+        let cyr_hit = match_snippet("Строка   один\n\tПРИВЕТ   Мир   конец", "привет мир")
+            .expect("cyrillic multi-word hit");
+        assert_eq!(cyr_hit, "Строка один ПРИВЕТ Мир конец");
+
+        let mixed = match_snippet("run_command: Проверка   Статуса ok", "проверка статуса")
+            .expect("mixed hit");
+        assert!(mixed.contains("Проверка Статуса"));
+
+        let mixed_ascii_first = match_snippet("Code K1TTY   Поиск   Тест done", "k1tty поиск")
+            .expect("mixed ascii-first");
+        assert!(mixed_ascii_first.contains("K1TTY Поиск"));
+
+        let mut giant = "abcdefghij ".repeat(200_000);
+        assert_eq!(match_snippet(&giant, "zz_not_present_zz"), None);
+        assert_eq!(match_snippet(&giant, "zz_not present"), None);
+        assert_eq!(match_snippet(&giant, "кириллица отсутствует"), None);
+
+        let cyr_pad = "ж".repeat(300);
+        let bounded = format!("{cyr_pad} ЦЕЛЕВОЙ   МАРКЕР {cyr_pad}");
+        let snip = match_snippet(&bounded, "целевой маркер").expect("bounded cyrillic hit");
+        assert!(snip.starts_with('…'));
+        assert!(snip.ends_with('…'));
+        assert!(snip.contains("ЦЕЛЕВОЙ МАРКЕР"));
+        assert!(snip.chars().count() < 160);
+
+        giant.push_str(" TAIL_NEEDLE_XYZ ");
+        giant.push_str(&"q".repeat(1000));
+        let deep = match_snippet(&giant, "tail_needle_xyz").expect("deep giant hit");
+        assert!(deep.starts_with('…'));
+        assert!(deep.ends_with('…'));
+        assert!(deep.contains("TAIL_NEEDLE_XYZ"));
+        assert!(deep.chars().count() < 160);
     }
 }

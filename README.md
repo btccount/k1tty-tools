@@ -1,12 +1,32 @@
 # K1tty Tools
 
-Нативное десктопное приложение на Rust + Tauri для просмотра, редактирования, очистки, оптимизации контекста и переноса истории диалогов в Google Antigravity, Antigravity CLI, OpenAI Codex, Claude Code и OpenCode.
+Нативное десктопное приложение на Rust + Tauri для просмотра, редактирования, генерации, очистки, оптимизации контекста и переноса истории диалогов в Google Antigravity, Antigravity CLI, OpenAI Codex, Claude Code и OpenCode.
 
-A native desktop application built with Rust + Tauri for viewing, editing, cleaning, optimizing context, and transferring conversation history across Google Antigravity, Antigravity CLI, OpenAI Codex, Claude Code, and OpenCode.
+A native desktop application built with Rust + Tauri for viewing, editing, generating, cleaning, optimizing context, and transferring conversation history across Google Antigravity, Antigravity CLI, OpenAI Codex, Claude Code, and OpenCode.
 
 ![Обзор: все среды, диалоги и бэкапы (тема Graphite) / Overview: all environments, dialogues, and backups (Graphite theme)](docs/screenshots/overview.png)
 
+## Последнее обновление (v2.1.0) / Latest Update (v2.1.0)
+
+**Русский:**
+- **Новая функция - Генератор диалогов**: встроенное создание реалистичных диалогов с нуля через **OpenRouter** (включая бесплатные `:free` модели), **DeepSeek** и любой **Custom OpenAI-совместимый API** (Ollama, LM Studio и др.). Доступна настройка сценария, объёма, языка, уровня размышлений (`Effort`), температуры, привязки к папке проекта, системного промпта, вызовов инструментов (`tool_use` / `tool_result`) и блоков `thinking`. Перед сохранением диалог можно просмотреть, отредактировать и сохранить в любую среду, а все сгенерированные чаты автоматически сохраняются в раздел «Сохраненные». *Примечание: некоторые модели могут возвращать отказы или работать некорректно на чувствительных/триггерных темах (например, читы и подобные сценарии) - в таких случаях рекомендуем использовать DeepSeek либо вручную корректировать системный промпт в расширенных настройках.*
+- **Производительность и большие диалоги**: ускорено сохранение и редактирование тяжёлых файлов и баз (потоковое копирование, частичная перезапись хвоста, кэширование заголовков и статистики контекста, быстрые префильтры поиска). Добавлены скользящее окно рендера и инкрементальная подгрузка для плавной работы на длинных чатах, кнопка быстрого перехода к последним сообщениям и автоматическая подгрузка истории при прокрутке вверх.
+- **Поиск по тексту**: добавлен переключатель точного поиска по целому слову (`W`, чтобы различать, например, `"чит"` и `"читать"`) и живая подсветка найденных совпадений прямо в сообщениях.
+- **Исправления и интерфейс**: исправлено редактирование уведомлений Claude (`Safety Classifier`, `Notice`, `isMeta`) - правка больше не превращает их в сообщения пользователя; прогресс-бар сохранения поднят поверх затемнения модальных окон; добавлены плавные переходы и верхняя полоса загрузки между диалогами; переведены системные предупреждения и ошибки бэкенда на `RU / UK / EN`.
+
+**English:**
+- **New Feature - Dialogue Generator**: built-in generator for creating realistic multi-turn dialogues from scratch via **OpenRouter** (including `:free` models), **DeepSeek**, and any **Custom OpenAI-compatible API** (Ollama, LM Studio, etc.). Supports scenario, length, language, reasoning effort, temperature, optional project folder context, system prompt, synthetic tool calls (`tool_use` / `tool_result`), and `thinking` blocks. Preview and edit turns before saving directly into any supported environment, with automatic draft saving under "Saved". *Note: some models may refuse or behave inconsistently on sensitive or trigger topics (such as cheats or similar subjects) - for those scenarios, we recommend using DeepSeek or manually adjusting the system prompt in advanced settings.*
+- **Performance & Large Dialogues**: significantly faster saving and editing on heavy files and databases (streaming backup copies, tail-only rewrites, cached titles and context stats, fast byte pre-filters). Added a sliding render window and incremental loading for smooth scrolling on massive chats, a quick jump-to-latest button, and automatic loading of older messages when scrolling up.
+- **In-Chat Search**: added a Whole Word toggle (`W`, distinguishing e.g. `"read"` vs `"reading"`) and live match highlighting directly inside messages.
+- **Fixes & UI Polish**: fixed editing Claude notices (`Safety Classifier`, `Notice`, `isMeta`) so they keep their proper notice role instead of turning into user messages; lifted the save progress bar above modal backdrops; added smooth thread-switching transitions and a subtle loading rail; localized backend warnings and error messages across `RU / UK / EN`.
+
 ## Возможности / Features
+
+### Генератор диалогов / Dialogue Generator
+
+Встроенный генератор позволяет создавать реалистичные многоходовые диалоги с нуля и сохранять их сразу в Antigravity, Codex, Claude или OpenCode. Поддерживаются **OpenRouter** (включая бесплатные `:free` модели), **DeepSeek** и любой OpenAI-совместимый **Custom API** (Ollama, LM Studio, vLLM и др.). Можно настроить тему, объём, язык, уровень размышлений (`Effort`), температуру, привязку к папке проекта, системный промпт, а также генерацию вызовов инструментов (`tool_use` / `tool_result`) и блоков `thinking`. Все генерации автоматически сохраняются в черновики («Сохраненные»), а перед записью диалог можно просмотреть и отредактировать по отдельным репликам. На чувствительных/триггерных темах (например, читы) часть моделей может уходить в отказ - в таких случаях лучше использовать **DeepSeek** или вручную подкорректировать системный промпт в расширенных настройках.
+
+The built-in generator lets you compose realistic multi-turn dialogues from scratch and save them directly into Antigravity, Codex, Claude, or OpenCode. Supports **OpenRouter** (including `:free` models), **DeepSeek**, and any OpenAI-compatible **Custom API** (Ollama, LM Studio, vLLM, etc.). Configure topic, length, language, reasoning effort, temperature, optional project folder context, system prompt, plus synthetic tool calls (`tool_use` / `tool_result`) and `thinking` blocks. Every generated dialogue is automatically archived under "Saved", and individual messages can be reviewed or edited before saving. On sensitive or trigger topics (such as cheats), some models may refuse or produce incomplete output - in those cases, use **DeepSeek** or adjust the generator system prompt manually in advanced settings.
 
 ### Блокировки в Codex / Codex Locks
 
@@ -35,9 +55,9 @@ Shows an estimated token count in the thread header and lets you slim down bloat
 
 ### Удаление, обрезка, поиск и пакетные действия / Trimming, Full-Text Search, and Batch Actions
 
-Удаление отдельных сообщений без сбоя нумерации шагов. Обрезка начала диалога до выбранного места или удаление всей переписки после нужного шага. Полнотекстовый поиск внутри чата (`Ctrl+F`) и по содержимому всех чатов (`Ctrl+Shift+F`), палитра команд (`Ctrl+K`), закрепление диалогов и мультивыбор в сайдбаре для пакетного экспорта или удаления.
+Удаление отдельных сообщений без сбоя нумерации шагов. Обрезка начала диалога до выбранного места или удаление всей переписки после нужного шага. Полнотекстовый поиск внутри чата (`Ctrl+F`) с переключателем точного слова (`W`) и живой подсветкой совпадений, поиск по содержимому всех чатов (`Ctrl+Shift+F`), автоматическая подгрузка старых сообщений при прокрутке вверх, палитра команд (`Ctrl+K`), закрепление диалогов и мультивыбор в сайдбаре для пакетного экспорта или удаления.
 
-Delete individual messages without breaking step numbering. Trim the beginning of a conversation up to a selected point, or remove everything after a specific step. Full-text search inside a chat (`Ctrl+F`) and across all chats (`Ctrl+Shift+F`), command palette (`Ctrl+K`), pinned chats, and sidebar multi-select for batch export or deletion.
+Delete individual messages without breaking step numbering. Trim the beginning of a conversation up to a selected point, or remove everything after a specific step. Full-text search inside a chat (`Ctrl+F`) with a Whole Word toggle (`W`) and live match highlighting, cross-chat search (`Ctrl+Shift+F`), automatic loading of older messages when scrolling up, command palette (`Ctrl+K`), pinned chats, and sidebar multi-select for batch export or deletion.
 
 ### Конвертация между средами и архивы `.k1tty` / Cross-Environment Conversion & `.k1tty` Archives
 
@@ -115,21 +135,21 @@ Pre-built installers for all platforms are published automatically in [GitHub Re
 
 ### Windows
 
-1. Скачайте `K1tty Tools_2.0.0_x64-setup.exe` (или `.msi`) со страницы [Releases](https://github.com/quesada-lab/k1tty-tools/releases).
+1. Скачайте `K1tty Tools_2.1.0_x64-setup.exe` (или `.msi`) со страницы [Releases](https://github.com/quesada-lab/k1tty-tools/releases).
 2. Запустите установщик. Если появится окно Windows SmartScreen (сборка без платной цифровой подписи), нажмите **«Подробнее» -> «Выполнить в любом случае»**.
 
-1. Download `K1tty Tools_2.0.0_x64-setup.exe` (or `.msi`) from [Releases](https://github.com/quesada-lab/k1tty-tools/releases).
+1. Download `K1tty Tools_2.1.0_x64-setup.exe` (or `.msi`) from [Releases](https://github.com/quesada-lab/k1tty-tools/releases).
 2. Run the installer. If Windows SmartScreen appears (unsigned open-source build), click **More info -> Run anyway**.
 
 ### macOS (Apple Silicon & Intel)
 
-1. Скачайте универсальный образ `K1tty Tools_2.0.0_universal.dmg` со страницы [Releases](https://github.com/quesada-lab/k1tty-tools/releases) и перетащите приложение в `Applications`.
+1. Скачайте универсальный образ `K1tty Tools_2.1.0_universal.dmg` со страницы [Releases](https://github.com/quesada-lab/k1tty-tools/releases) и перетащите приложение в `Applications`.
 2. Так как сборка не нотаризована в Apple, при первом запуске снимите флаг карантина:
    ```bash
    xattr -cr "/Applications/K1tty Tools.app"
    ```
 
-1. Download the universal `K1tty Tools_2.0.0_universal.dmg` from [Releases](https://github.com/quesada-lab/k1tty-tools/releases) and drag the app into `Applications`.
+1. Download the universal `K1tty Tools_2.1.0_universal.dmg` from [Releases](https://github.com/quesada-lab/k1tty-tools/releases) and drag the app into `Applications`.
 2. Since the build is not notarized with Apple, clear the quarantine attribute before the first launch:
    ```bash
    xattr -cr "/Applications/K1tty Tools.app"
@@ -207,8 +227,8 @@ The UI lists backups, shows their size, and lets you inspect or restore them dir
 
 ```
 k1tty-tools/
-├── crates/core/          # ядро на Rust: провайдеры, конвертер, оптимизация контекста, монитор процессов
-│                         # Rust core: providers, converter, context optimizer, process monitor
+├── crates/core/          # ядро на Rust: провайдеры, конвертер, генератор диалогов, оптимизация контекста, монитор процессов
+│                         # Rust core: providers, converter, dialogue generator, context optimizer, process monitor
 ├── src-tauri/            # нативная оболочка Tauri v2, команды IPC и конфигурация сборки
 │                         # Tauri v2 native shell, IPC commands, and bundle config
 ├── static/               # фронтенд интерфейса (HTML/JS/CSS, темы, встроенные шрифты и KaTeX)
@@ -218,6 +238,11 @@ k1tty-tools/
 └── .github/workflows/    # кроссплатформенная сборка и релизы (Windows, macOS, Linux)
                           # cross-platform CI builds and releases (Windows, macOS, Linux)
 ```
+
+## Telegram
+
+Новости, обновления и обратная связь: [@k1ttyfthoughts](https://t.me/k1ttyfthoughts) и [@nepofiksili](https://t.me/nepofiksili).  
+Updates, releases, and feedback: [@k1ttyfthoughts](https://t.me/k1ttyfthoughts) and [@nepofiksili](https://t.me/nepofiksili).
 
 ## Лицензия / License
 

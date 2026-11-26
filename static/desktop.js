@@ -188,6 +188,7 @@
     importPack: (token, target, title, includeTools) => invoke("import_pack", { token, target, title, includeTools }),
     writeText: (text) => invoke("plugin:clipboard-manager|write_text", { text: String(text) }),
     openUrl: (url) => invoke("plugin:opener|open_url", { url }),
+    pickFolder: () => invoke("pick_folder"),
     revealPath: (path) => invoke("reveal_path", { path: String(path) }),
   });
   document.addEventListener("click", (event) => {

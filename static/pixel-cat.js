@@ -278,11 +278,14 @@
   const reducedMedia = window.matchMedia?.("(prefers-reduced-motion: reduce)");
   const isReduced = () => window.K1ttyAppearance?.isReducedMotion?.() ?? !!reducedMedia?.matches;
   let lastReduced = isReduced();
+  let viewW = Math.max(1, window.innerWidth || 1280);
+  let viewH = Math.max(1, window.innerHeight || 840);
+  let windowBlurred = false;
   let hasPointer = false;
-  let mx = window.innerWidth * 0.5;
-  let my = window.innerHeight * 0.5;
-  let cx = window.innerWidth - 64;
-  let cy = window.innerHeight - 64;
+  let mx = viewW * 0.5;
+  let my = viewH * 0.5;
+  let cx = viewW - 64;
+  let cy = viewH - 64;
   let facing = "L";
   let mode = "idle";
   let idleTime = 0;
@@ -299,8 +302,13 @@
 
   let lastWinter = false;
 
+  function syncViewport() {
+    viewW = Math.max(1, window.innerWidth || 1280);
+    viewH = Math.max(1, window.innerHeight || 840);
+  }
+
   function draw(name) {
-    if (!enabled || document.hidden) return;
+    if (!enabled || document.hidden || windowBlurred) return;
     const isWinter = document.body.classList.contains("winter-theme");
     if (name === lastFrame && isWinter === lastWinter) return;
     if (!ctx) {
@@ -334,13 +342,13 @@
 
   function clampPos() {
     const pad = 20;
-    cx = Math.max(pad, Math.min(window.innerWidth - pad, cx));
-    cy = Math.max(pad, Math.min(window.innerHeight - pad, cy));
+    cx = Math.max(pad, Math.min(viewW - pad, cx));
+    cy = Math.max(pad, Math.min(viewH - pad, cy));
   }
 
   function step(ts) {
     rafId = 0;
-    if (!enabled || document.hidden || isReduced()) return;
+    if (!enabled || document.hidden || windowBlurred || isReduced()) return;
     const dt = prevTs ? Math.min(0.3, Math.max(0.001, (ts - prevTs) / 1000)) : 0.016;
     const movementDt = Math.min(0.06, dt);
     prevTs = ts;
@@ -430,13 +438,13 @@
        
       idleTimer = setTimeout(() => {
         idleTimer = 0;
-        if (enabled && !document.hidden && !isReduced()) rafId = requestAnimationFrame(step);
+        if (enabled && !document.hidden && !windowBlurred && !isReduced()) rafId = requestAnimationFrame(step);
       }, idleTime > 14 ? 250 : 100);
     }
   }
 
   function startLoop() {
-    if (!enabled || document.hidden || isReduced() || !hasPointer || rafId) return;
+    if (!enabled || document.hidden || windowBlurred || isReduced() || !hasPointer || rafId) return;
     if (idleTimer) { clearTimeout(idleTimer); idleTimer = 0; }
     rafId = requestAnimationFrame(step);
   }
@@ -458,6 +466,7 @@
     } catch {}
     canvas.classList.toggle("hidden", !enabled);
     if (enabled) {
+      syncViewport();
       clampPos();
       draw("sit1");
       place();
@@ -468,27 +477,47 @@
   }
 
   window.addEventListener("pointermove", (ev) => {
-    if (!enabled || document.hidden || isReduced()) return;
+    if (!enabled || document.hidden || windowBlurred || isReduced()) return;
     mx = ev.clientX;
     my = ev.clientY;
     if (!hasPointer) {
       hasPointer = true;
-      cx = Math.max(24, Math.min(window.innerWidth - 24, mx + 64));
-      cy = Math.max(24, Math.min(window.innerHeight - 24, my + 24));
+      cx = Math.max(24, Math.min(viewW - 24, mx + 64));
+      cy = Math.max(24, Math.min(viewH - 24, my + 24));
       place();
+      startLoop();
+      return;
+    }
+    if (mode === "idle") {
+      const dx = mx - cx;
+      const dy = my - cy;
+      const distSq = dx * dx + dy * dy;
+      if (distSq <= WAKE_DIST * WAKE_DIST && distSq >= TOO_CLOSE * TOO_CLOSE) return;
     }
     startLoop();
   }, { passive: true });
 
   window.addEventListener("resize", () => {
     if (!enabled || document.hidden) return;
+    syncViewport();
     clampPos();
     place();
   }, { passive: true });
 
+  window.addEventListener("blur", () => {
+    windowBlurred = true;
+    stopLoop();
+  });
+
+  window.addEventListener("focus", () => {
+    if (!windowBlurred) return;
+    windowBlurred = false;
+    if (enabled && !document.hidden && !isReduced()) startLoop();
+  });
+
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) stopLoop();
-    else if (enabled) startLoop();
+    else if (enabled && !windowBlurred) startLoop();
   });
 
   function syncMotion() {
@@ -498,18 +527,19 @@
     stopLoop();
     if (!enabled) return;
     draw("sit1");
-    if (!reduced) startLoop();
+    if (!reduced && !windowBlurred) startLoop();
   }
   window.addEventListener("k1tty:appearancechange", syncMotion);
   reducedMedia?.addEventListener?.("change", syncMotion);
 
   function mount() {
     document.body.appendChild(canvas);
+    syncViewport();
     draw("sit1");
     clampPos();
     place();
     canvas.classList.toggle("hidden", !enabled);
-    if (enabled) startLoop();
+    if (enabled && !windowBlurred) startLoop();
   }
 
   window.K1ttyCat = {

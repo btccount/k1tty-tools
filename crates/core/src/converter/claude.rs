@@ -395,7 +395,6 @@ pub(super) fn import(
     while i < entries.len() {
         let e = &entries[i];
         let time = times[i];
-        i += 1;
         let ts = iso(time);
         let uid = uuid();
         let kind = nonempty(s(e, "kind")).unwrap_or_else(|| "assistant".into());
@@ -406,6 +405,7 @@ pub(super) fn import(
             && doc["meta"]["source_provider"] == "claude"
             && crate::claude::is_classifier_text(&text)
         {
+            i += 1;
             let mut rec = common(&uid, &ts);
             rec["parentUuid"] = json!(prev);
             rec["type"] = json!("system");
@@ -418,6 +418,7 @@ pub(super) fn import(
             continue;
         }
         if kind == "user" {
+            i += 1;
             prompt += 1;
             prompt_id = uuid();
             last_user = text.clone();
@@ -437,110 +438,235 @@ pub(super) fn import(
             prev = Some(uid);
             continue;
         }
-        if kind == "assistant" || kind == "tool" {
+        if kind == "assistant" {
+            i += 1;
             let short = shorten(&uid.replace('-', ""), 24);
-            let is_thinking = kind == "tool" && subtype == "thinking";
-            let is_tool_result = kind == "tool" && subtype == "tool_result";
-            if is_thinking && text.trim().is_empty() {
-                continue;
-            }
-            if is_tool_result {
-                continue;
-            }
-            let is_tool = kind == "tool" && !is_thinking;
-            let tool_id = format!("toolu_{short}");
             let mut rec = common(&uid, &ts);
             rec["parentUuid"] = json!(prev);
-            let content = if is_thinking {
-                json!([{"type":"thinking","thinking":text}])
-            } else if is_tool {
-                let raw_name = nonempty(s(e, "tool"))
-                    .or_else(|| nonempty(s(e, "label")))
-                    .unwrap_or_else(|| "tool".into());
-                let stripped = raw_name
-                    .strip_prefix("Команда: ")
-                    .or_else(|| raw_name.strip_prefix("Инструмент: "))
-                    .or_else(|| raw_name.strip_prefix("Tool: "))
-                    .unwrap_or(&raw_name);
-                let safe: String = stripped
-                    .chars()
-                    .map(|ch| {
-                        if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
-                            ch
-                        } else {
-                            '_'
-                        }
-                    })
-                    .take(64)
-                    .collect();
-                let tool_name = if safe.is_empty() { "tool" } else { &safe };
-                let input = match serde_json::from_str::<Value>(&text) {
-                    Ok(v) if v.is_object() => v,
-                    _ if matches!(
-                        tool_name.to_ascii_lowercase().as_str(),
-                        "bash" | "shell" | "run_command"
-                    ) =>
-                    {
-                        json!({"command":text})
-                    }
-                    _ => json!({"summary":shorten(&text,300)}),
-                };
-                json!([{"type":"tool_use","id":tool_id,"name":tool_name,"input":input}])
-            } else {
-                json!([{"type":"text","text":text}])
-            };
-            rec["message"] = json!({"model":model,"id":format!("msg_{short}"),"type":"message","role":"assistant","content":content,
-                "container":null,"stop_reason":if is_tool{json!("tool_use")}else if is_thinking{Value::Null}else{json!("end_turn")},"stop_sequence":null,"usage":usage(&text)});
+            rec["message"] = json!({"model":model,"id":format!("msg_{short}"),"type":"message","role":"assistant","content":[{"type":"text","text":text}],
+                "container":null,"stop_reason":"end_turn","stop_sequence":null,"usage":usage(&text)});
             rec["requestId"] = json!(format!("req_{short}"));
             rec["requestedModel"] = json!(model);
             rec["type"] = json!("assistant");
             rec["madeBy"] = json!("model");
             lines.push(rec);
-            if is_tool {
-                let (result_text, result_err, result_ts) = if i < entries.len()
-                    && s(&entries[i], "kind") == "tool"
-                    && s(&entries[i], "subtype") == "tool_result"
-                {
-                    let next_e = &entries[i];
-                    let next_ts = iso(times[i]);
-                    i += 1;
-                    (
-                        s(next_e, "text"),
-                        s(next_e, "status").eq_ignore_ascii_case("error"),
-                        next_ts,
-                    )
-                } else {
-                    (
-                        text.clone(),
-                        s(e, "status").eq_ignore_ascii_case("error"),
-                        ts.clone(),
-                    )
-                };
-                let rid = uuid();
-                let mut result = common(&rid, &result_ts);
-                result["parentUuid"] = json!(uid);
-                result["promptId"] = json!(prompt_id);
-                result["type"] = json!("user");
-                let output = json!([{"type":"text","text":if result_text.is_empty(){"ok"}else{&result_text}}]);
-                let mut tr_block =
-                    json!({"tool_use_id":tool_id,"type":"tool_result","content":output});
-                if result_err {
-                    tr_block["is_error"] = json!(true);
-                }
-                result["message"] = json!({"role":"user","content":[tr_block]});
-                result["toolUseResult"] = output;
-                result["sourceToolAssistantUUID"] = json!(uid);
-                lines.push(result);
-                prev = Some(rid);
-            } else {
-                prev = Some(uid.clone());
-                if !is_thinking {
-                    last_uuid = Some(uid);
-                    last_text = text;
-                }
-            }
+            prev = Some(uid.clone());
+            last_uuid = Some(uid);
+            last_text = text;
             continue;
         }
+        if kind == "tool" && subtype == "thinking" {
+            i += 1;
+            if text.trim().is_empty() {
+                continue;
+            }
+            let short = shorten(&uid.replace('-', ""), 24);
+            let mut rec = common(&uid, &ts);
+            rec["parentUuid"] = json!(prev);
+            rec["message"] = json!({"model":model,"id":format!("msg_{short}"),"type":"message","role":"assistant","content":[{"type":"thinking","thinking":text}],
+                "container":null,"stop_reason":Value::Null,"stop_sequence":null,"usage":usage(&text)});
+            rec["requestId"] = json!(format!("req_{short}"));
+            rec["requestedModel"] = json!(model);
+            rec["type"] = json!("assistant");
+            rec["madeBy"] = json!("model");
+            lines.push(rec);
+            prev = Some(uid);
+            continue;
+        }
+        if kind == "tool" {
+            if tools::is_tool_result_entry(e) {
+                i += 1;
+                continue;
+            }
+            let inv = tools::consume_tool_pair(&entries, &times, &mut i);
+            let call_ts = iso(inv.ts_call);
+            let res_ts = iso(inv.ts_result.max(inv.ts_call));
+            let short = shorten(&uid.replace('-', ""), 24);
+            let tool_id = format!("toolu_{short}");
+            let out_or_ok = if inv.result_text.is_empty() {
+                "ok".to_owned()
+            } else {
+                inv.result_text.clone()
+            };
+            let nlines = out_or_ok.lines().count().max(1);
+            let (tool_name, input, tr_content, tool_use_result): (String, Value, Value, Value) =
+                match inv.canonical {
+                    tools::CanonicalTool::Read {
+                        path,
+                        start_line,
+                        end_line,
+                    } => {
+                        let mut inp = json!({"file_path":path});
+                        if let Some(s) = start_line {
+                            inp["offset"] = json!(s);
+                            if let Some(e) = end_line.filter(|e| *e >= s) {
+                                inp["limit"] = json!(e - s + 1);
+                            }
+                        }
+                        let tr = json!(out_or_ok);
+                        let tur = if inv.is_error {
+                            json!(format!("Error: {out_or_ok}"))
+                        } else {
+                            json!({"type":"text","file":{"filePath":path,"content":out_or_ok,"numLines":nlines,"startLine":start_line.unwrap_or(1),"totalLines":nlines}})
+                        };
+                        ("Read".into(), inp, tr, tur)
+                    }
+                    tools::CanonicalTool::Edit {
+                        path,
+                        old_string,
+                        new_string,
+                        content,
+                        ..
+                    } => {
+                        if !old_string.is_empty() {
+                            let inp = json!({"file_path":path,"old_string":old_string,"new_string":new_string,"replace_all":false});
+                            let tr = json!(out_or_ok);
+                            let tur = if inv.is_error {
+                                json!(format!("Error: {out_or_ok}"))
+                            } else {
+                                json!({"filePath":path,"oldString":old_string,"newString":new_string,"replaceAll":false})
+                            };
+                            ("Edit".into(), inp, tr, tur)
+                        } else {
+                            let file_content = content.unwrap_or(new_string);
+                            let inp = json!({"file_path":path,"content":file_content});
+                            let tr = json!(out_or_ok);
+                            let tur = if inv.is_error {
+                                json!(format!("Error: {out_or_ok}"))
+                            } else {
+                                json!({"type":"create","filePath":path,"content":file_content})
+                            };
+                            ("Write".into(), inp, tr, tur)
+                        }
+                    }
+                    tools::CanonicalTool::Write { path, content } => {
+                        let inp = json!({"file_path":path,"content":content});
+                        let tr = json!(out_or_ok);
+                        let tur = if inv.is_error {
+                            json!(format!("Error: {out_or_ok}"))
+                        } else {
+                            json!({"type":"create","filePath":path,"content":content})
+                        };
+                        ("Write".into(), inp, tr, tur)
+                    }
+                    tools::CanonicalTool::Delete { path } => {
+                        let cmd = format!("rm -f {}", tools::shell_quote(&path));
+                        let desc = format!("Delete {}", tools::basename(&path));
+                        let inp = json!({"command":cmd,"description":desc});
+                        let tr = json!(out_or_ok);
+                        let tur = if inv.is_error {
+                            json!(format!("Error: {out_or_ok}"))
+                        } else {
+                            json!({"stdout":inv.result_text,"stderr":"","interrupted":false,"isImage":false})
+                        };
+                        ("Bash".into(), inp, tr, tur)
+                    }
+                    tools::CanonicalTool::Shell {
+                        command,
+                        description,
+                    } => {
+                        let mut inp = json!({"command":command});
+                        if let Some(desc) = description.filter(|s| !s.is_empty()) {
+                            inp["description"] = json!(desc);
+                        }
+                        let tr = json!(out_or_ok);
+                        let tur = if inv.is_error {
+                            json!(format!("Error: {out_or_ok}"))
+                        } else {
+                            json!({"stdout":inv.result_text,"stderr":"","interrupted":false,"isImage":false})
+                        };
+                        ("Bash".into(), inp, tr, tur)
+                    }
+                    tools::CanonicalTool::ListDir { path, pattern } => {
+                        let pat = pattern.unwrap_or_else(|| "*".into());
+                        let inp = json!({"pattern":pat,"path":path});
+                        let files: Vec<String> = inv
+                            .result_text
+                            .lines()
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                            .map(str::to_owned)
+                            .collect();
+                        let tr = json!(out_or_ok);
+                        let tur = if inv.is_error {
+                            json!(format!("Error: {out_or_ok}"))
+                        } else {
+                            json!({"filenames":files,"durationMs":12,"numFiles":files.len(),"truncated":false})
+                        };
+                        ("Glob".into(), inp, tr, tur)
+                    }
+                    tools::CanonicalTool::Grep { pattern, path } => {
+                        let mut inp = json!({"pattern":pattern,"output_mode":"content"});
+                        if let Some(p) = path.filter(|s| !s.is_empty()) {
+                            inp["path"] = json!(p);
+                        }
+                        let tr = json!(out_or_ok);
+                        let tur = if inv.is_error {
+                            json!(format!("Error: {out_or_ok}"))
+                        } else {
+                            json!({"mode":"content","numFiles":0,"filenames":[],"content":inv.result_text,"numLines":nlines,"totalLines":nlines})
+                        };
+                        ("Grep".into(), inp, tr, tur)
+                    }
+                    tools::CanonicalTool::WebSearch { query } => {
+                        let inp = json!({"query":query});
+                        let tr = json!([{"type":"text","text":out_or_ok}]);
+                        ("WebSearch".into(), inp, tr.clone(), tr)
+                    }
+                    tools::CanonicalTool::Generic { name, args } => {
+                        let safe: String = name
+                            .chars()
+                            .map(|ch| {
+                                if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
+                                    ch
+                                } else {
+                                    '_'
+                                }
+                            })
+                            .take(64)
+                            .collect();
+                        let safe_name = if safe.is_empty() {
+                            "tool".to_owned()
+                        } else {
+                            safe
+                        };
+                        let inp = if args.as_object().is_some_and(|m| !m.is_empty()) {
+                            args
+                        } else {
+                            json!({"summary":shorten(&out_or_ok, 300)})
+                        };
+                        let tr = json!([{"type":"text","text":out_or_ok}]);
+                        (safe_name, inp, tr.clone(), tr)
+                    }
+                };
+            let mut rec = common(&uid, &call_ts);
+            rec["parentUuid"] = json!(prev);
+            rec["message"] = json!({"model":model,"id":format!("msg_{short}"),"type":"message","role":"assistant","content":[{"type":"tool_use","id":tool_id,"name":tool_name,"input":input}],
+                "container":null,"stop_reason":"tool_use","stop_sequence":null,"usage":usage(&inv.call_text)});
+            rec["requestId"] = json!(format!("req_{short}"));
+            rec["requestedModel"] = json!(model);
+            rec["type"] = json!("assistant");
+            rec["madeBy"] = json!("model");
+            lines.push(rec);
+
+            let rid = uuid();
+            let mut result = common(&rid, &res_ts);
+            result["parentUuid"] = json!(uid);
+            result["promptId"] = json!(prompt_id);
+            result["type"] = json!("user");
+            let mut tr_block =
+                json!({"tool_use_id":tool_id,"type":"tool_result","content":tr_content});
+            if inv.is_error {
+                tr_block["is_error"] = json!(true);
+            }
+            result["message"] = json!({"role":"user","content":[tr_block]});
+            result["toolUseResult"] = tool_use_result;
+            result["sourceToolAssistantUUID"] = json!(uid);
+            lines.push(result);
+            prev = Some(rid);
+            continue;
+        }
+        i += 1;
         if kind == "system"
             && subtype == "informational"
             && matches!(

@@ -396,15 +396,18 @@ pub(super) fn import(
         let mut agent_id = None;
         let mut agent_text = String::new();
         let mut turn_error: Option<Value> = None;
-        for (pos, i) in indices.iter().enumerate() {
-            let entry = &entries[*i];
-            let sec = times[*i];
+        let mut pos = 0usize;
+        while pos < indices.len() {
+            let i = indices[pos];
+            let entry = &entries[i];
+            let sec = times[i];
             let ms = (sec * 1000.0) as i64;
             let ts = iso(sec);
             let kind = nonempty(s(entry, "kind")).unwrap_or_else(|| "assistant".into());
             let subtype = s(entry, "subtype");
             let text = s(entry, "text");
             if kind == "user" {
+                pos += 1;
                 if first_user.is_empty() {
                     first_user = shorten(&text, 400);
                 }
@@ -418,43 +421,35 @@ pub(super) fn import(
                 let (ord,_,_)=rollout.emit(&ts,"event_msg",json!({"type":"item_completed","thread_id":tid,"turn_id":turn,
                     "item":{"type":"UserMessage","id":uid,"client_id":client,"content":[{"type":"text","text":text,"text_elements":[]}]},"started_at_ms":ms,"completed_at_ms":ms}))?;
                 proj_items.push(ProjItem{turn:turn.clone(),id:uid.clone(),ordinal:ord,ms,item:json!({"type":"userMessage","id":uid,"clientId":client,"content":[{"type":"text","text":text,"text_elements":[]}]}),kind:"userMessage".into()});
-            } else if kind == "assistant" || (kind == "tool" && subtype != "thinking") {
-                let is_tool = kind == "tool";
-                let phase = if !is_tool && last_asst == Some(pos) {
+            } else if kind == "assistant" {
+                let phase = if last_asst == Some(pos) {
                     "final_answer"
                 } else {
                     "commentary"
                 };
-                let display = if is_tool {
-                    let name = nonempty(s(entry, "tool"))
-                        .or_else(|| nonempty(s(entry, "label")))
-                        .unwrap_or_else(|| "tool".into());
-                    if text.is_empty() {
-                        format!("[{name}]")
-                    } else {
-                        format!("[{name}]\n{text}")
-                    }
-                } else {
-                    text.clone()
-                };
+                pos += 1;
                 let mid = format!("msg_{}{}", uuid_hex(), &uuid_hex()[..16]);
-                if !is_tool {
-                    agent_id = Some(mid.clone());
-                    agent_text = text;
-                }
+                agent_id = Some(mid.clone());
+                agent_text = text.clone();
                 let (ord,_,_)=rollout.emit(&ts,"event_msg",json!({"type":"item_completed","thread_id":tid,"turn_id":turn,
-                    "item":{"type":"AgentMessage","id":mid,"content":[{"type":"Text","text":display}],"phase":phase},
-                    "content_token_count":(display.chars().count()/4).max(1),"started_at_ms":ms,"completed_at_ms":ms}))?;
-                let mut payload = json!({"type":"message","status":"completed","id":mid,"role":"assistant",
-                    "content":[{"type":"output_text","text":display,"annotations":[],"logprobs":[]}],"phase":phase});
-                if !is_tool {
-                    payload["internal_chat_message_metadata_passthrough"] =
-                        json!({"turn_id":turn,"create_time":sec,"content_item_kinds":["unknown"]});
-                }
+                    "item":{"type":"AgentMessage","id":mid,"content":[{"type":"Text","text":text}],"phase":phase},
+                    "content_token_count":(text.chars().count()/4).max(1),"started_at_ms":ms,"completed_at_ms":ms}))?;
+                let payload = json!({"type":"message","status":"completed","id":mid,"role":"assistant",
+                    "content":[{"type":"output_text","text":text,"annotations":[],"logprobs":[]}],"phase":phase,
+                    "internal_chat_message_metadata_passthrough":{"turn_id":turn,"create_time":sec,"content_item_kinds":["unknown"]}});
                 rollout.emit(&ts, "response_item", payload)?;
-                proj_items.push(ProjItem{turn:turn.clone(),id:mid.clone(),ordinal:ord,ms,item:json!({"type":"agentMessage","moderation":null,"id":mid,"text":display,"phase":phase,"memoryCitation":null,"delivery":null,"questions":null}),kind:"agentMessage".into()});
+                proj_items.push(ProjItem{turn:turn.clone(),id:mid.clone(),ordinal:ord,ms,item:json!({"type":"agentMessage","moderation":null,"id":mid,"text":text,"phase":phase,"memoryCitation":null,"delivery":null,"questions":null}),kind:"agentMessage".into()});
             } else if kind == "tool" && subtype == "thinking" {
+                pos += 1;
+                if text.trim().is_empty() {
+                    continue;
+                }
                 let rid = format!("rs_{}", uuid_hex());
+                rollout.emit(
+                    &ts,
+                    "response_item",
+                    json!({"type":"reasoning","id":rid,"summary":[{"type":"summary_text","text":text}]}),
+                )?;
                 let (ord,_,_)=rollout.emit(&ts,"event_msg",json!({"type":"item_completed","thread_id":tid,"turn_id":turn,
                     "item":{"type":"Reasoning","id":rid,"summary_text":[text],"raw_content":[]},"started_at_ms":ms,"completed_at_ms":ms}))?;
                 proj_items.push(ProjItem {
@@ -465,7 +460,316 @@ pub(super) fn import(
                     item: json!({"type":"reasoning","id":rid,"summary":[text],"content":[]}),
                     kind: "reasoning".into(),
                 });
+            } else if kind == "tool" {
+                let mut cursor = i;
+                let inv = tools::consume_tool_pair(&entries, &times, &mut cursor);
+                pos += cursor - i;
+                let call_sec = inv.ts_call;
+                let res_sec = inv.ts_result.max(call_sec);
+                let call_ts = iso(call_sec);
+                let res_ts = iso(res_sec);
+                let c_ms = (call_sec * 1000.0) as i64;
+                let r_ms = ((res_sec * 1000.0) as i64).max(c_ms + 50);
+                let dur_ms = (r_ms - c_ms).max(1);
+                let status_str = if inv.is_error { "failed" } else { "completed" };
+                let call_id = format!("call_{}", &uuid_hex()[..24]);
+                let fc_id = format!("fc_{}", uuid_hex());
+                let fco_id = format!("fco_{}", uuid_hex());
+                let item_id = format!("exec-{}", uuid());
+                match inv.canonical {
+                    tools::CanonicalTool::Write { path, content } => {
+                        let patch = tools::build_apply_patch(&path, "", &content, true, false);
+                        let out_str = if inv.result_text.is_empty() {
+                            format!("Success. Updated the following files:\nA {path}\n")
+                        } else {
+                            inv.result_text.clone()
+                        };
+                        rollout.emit(
+                            &call_ts,
+                            "response_item",
+                            json!({"type":"custom_tool_call","id":fc_id,"status":"completed","call_id":call_id,"name":"apply_patch","input":patch}),
+                        )?;
+                        let mut changes = serde_json::Map::new();
+                        changes.insert(path.clone(), json!({"type":"add","content":content}));
+                        let (ord, _, _) = rollout.emit(
+                            &res_ts,
+                            "event_msg",
+                            json!({"type":"item_completed","thread_id":tid,"turn_id":turn,"item":{"type":"FileChange","id":item_id,"changes":changes,"status":status_str,"stdout":out_str,"stderr":if inv.is_error{&out_str}else{""}},"started_at_ms":c_ms,"completed_at_ms":r_ms}),
+                        )?;
+                        rollout.emit(
+                            &res_ts,
+                            "response_item",
+                            json!({"type":"custom_tool_call_output","id":fco_id,"call_id":call_id,"output":out_str}),
+                        )?;
+                        proj_items.push(ProjItem {
+                            turn: turn.clone(),
+                            id: item_id.clone(),
+                            ordinal: ord,
+                            ms: c_ms,
+                            item: json!({"type":"fileChange","id":item_id,"changes":[{"path":path,"kind":{"type":"add"},"diff":content}],"status":status_str}),
+                            kind: "fileChange".into(),
+                        });
+                    }
+                    tools::CanonicalTool::Delete { path } => {
+                        let patch = tools::build_apply_patch(&path, "", "", false, true);
+                        let out_str = if inv.result_text.is_empty() {
+                            format!("Success. Updated the following files:\nD {path}\n")
+                        } else {
+                            inv.result_text.clone()
+                        };
+                        rollout.emit(
+                            &call_ts,
+                            "response_item",
+                            json!({"type":"custom_tool_call","id":fc_id,"status":"completed","call_id":call_id,"name":"apply_patch","input":patch}),
+                        )?;
+                        let mut changes = serde_json::Map::new();
+                        changes.insert(path.clone(), json!({"type":"delete","content":""}));
+                        let (ord, _, _) = rollout.emit(
+                            &res_ts,
+                            "event_msg",
+                            json!({"type":"item_completed","thread_id":tid,"turn_id":turn,"item":{"type":"FileChange","id":item_id,"changes":changes,"status":status_str,"stdout":out_str,"stderr":if inv.is_error{&out_str}else{""}},"started_at_ms":c_ms,"completed_at_ms":r_ms}),
+                        )?;
+                        rollout.emit(
+                            &res_ts,
+                            "response_item",
+                            json!({"type":"custom_tool_call_output","id":fco_id,"call_id":call_id,"output":out_str}),
+                        )?;
+                        proj_items.push(ProjItem {
+                            turn: turn.clone(),
+                            id: item_id.clone(),
+                            ordinal: ord,
+                            ms: c_ms,
+                            item: json!({"type":"fileChange","id":item_id,"changes":[{"path":path,"kind":{"type":"delete"},"diff":""}],"status":status_str}),
+                            kind: "fileChange".into(),
+                        });
+                    }
+                    tools::CanonicalTool::Edit {
+                        path,
+                        old_string,
+                        new_string,
+                        diff,
+                        content,
+                    } => {
+                        let replacement = if new_string.is_empty() {
+                            content.unwrap_or_default()
+                        } else {
+                            new_string
+                        };
+                        let udiff = diff.unwrap_or_else(|| {
+                            tools::build_unified_diff(&old_string, &replacement)
+                        });
+                        let patch = tools::build_apply_patch(
+                            &path,
+                            &old_string,
+                            &replacement,
+                            false,
+                            false,
+                        );
+                        let out_str = if inv.result_text.is_empty() {
+                            format!("Success. Updated the following files:\nM {path}\n")
+                        } else {
+                            inv.result_text.clone()
+                        };
+                        rollout.emit(
+                            &call_ts,
+                            "response_item",
+                            json!({"type":"custom_tool_call","id":fc_id,"status":"completed","call_id":call_id,"name":"apply_patch","input":patch}),
+                        )?;
+                        let mut changes = serde_json::Map::new();
+                        changes.insert(
+                            path.clone(),
+                            json!({"type":"update","unified_diff":udiff,"move_path":null}),
+                        );
+                        let (ord, _, _) = rollout.emit(
+                            &res_ts,
+                            "event_msg",
+                            json!({"type":"item_completed","thread_id":tid,"turn_id":turn,"item":{"type":"FileChange","id":item_id,"changes":changes,"status":status_str,"stdout":out_str,"stderr":if inv.is_error{&out_str}else{""}},"started_at_ms":c_ms,"completed_at_ms":r_ms}),
+                        )?;
+                        rollout.emit(
+                            &res_ts,
+                            "response_item",
+                            json!({"type":"custom_tool_call_output","id":fco_id,"call_id":call_id,"output":out_str}),
+                        )?;
+                        proj_items.push(ProjItem {
+                            turn: turn.clone(),
+                            id: item_id.clone(),
+                            ordinal: ord,
+                            ms: c_ms,
+                            item: json!({"type":"fileChange","id":item_id,"changes":[{"path":path,"kind":{"type":"update","move_path":null},"diff":udiff}],"status":status_str}),
+                            kind: "fileChange".into(),
+                        });
+                    }
+                    tools::CanonicalTool::Shell { .. }
+                    | tools::CanonicalTool::Read { .. }
+                    | tools::CanonicalTool::ListDir { .. }
+                    | tools::CanonicalTool::Grep { .. } => {
+                        let (cmd_str, parsed_cmd, command_actions) = match inv.canonical {
+                            tools::CanonicalTool::Read {
+                                path,
+                                start_line,
+                                end_line,
+                            } => {
+                                let qpath = tools::shell_quote(&path);
+                                let cmd = if let (Some(s), Some(e)) = (start_line, end_line) {
+                                    format!("sed -n '{s},{e}p' {qpath}")
+                                } else {
+                                    format!("cat {qpath}")
+                                };
+                                let bname = tools::basename(&path);
+                                (
+                                    cmd.clone(),
+                                    json!([{"type":"read","cmd":cmd,"name":bname,"path":path}]),
+                                    json!([{"type":"read","command":cmd,"name":bname,"path":path}]),
+                                )
+                            }
+                            tools::CanonicalTool::Shell { command, .. } => (
+                                command.clone(),
+                                json!([{"type":"unknown","cmd":command}]),
+                                json!([{"type":"unknown","command":command}]),
+                            ),
+                            tools::CanonicalTool::ListDir { path, pattern } => {
+                                let qpath = tools::shell_quote(&path);
+                                let cmd = if let Some(pat) =
+                                    pattern.as_deref().filter(|s| !s.is_empty())
+                                {
+                                    format!("rg --files -g {} {qpath}", tools::shell_quote(pat))
+                                } else {
+                                    format!("ls -la {qpath}")
+                                };
+                                (
+                                    cmd.clone(),
+                                    json!([{"type":"unknown","cmd":cmd}]),
+                                    json!([{"type":"unknown","command":cmd}]),
+                                )
+                            }
+                            tools::CanonicalTool::Grep { pattern, path } => {
+                                let qpat = tools::shell_quote(&pattern);
+                                let cmd = if let Some(p) = path.as_deref().filter(|s| !s.is_empty())
+                                {
+                                    format!("rg -n {qpat} {}", tools::shell_quote(p))
+                                } else {
+                                    format!("rg -n {qpat}")
+                                };
+                                (
+                                    cmd.clone(),
+                                    json!([{"type":"unknown","cmd":cmd}]),
+                                    json!([{"type":"unknown","command":cmd}]),
+                                )
+                            }
+                            _ => unreachable!(),
+                        };
+                        let proc_id =
+                            format!("{}", 10000 + (rollout.ordinal as u64 * 7919) % 80000);
+                        let shell_argv = if cfg!(windows) {
+                            json!(["powershell.exe", "-Command", cmd_str])
+                        } else {
+                            json!(["/bin/sh", "-lc", cmd_str])
+                        };
+                        let fn_args = serde_json::to_string(&json!({"cmd":cmd_str,"workdir":cwd}))?;
+                        rollout.emit(
+                            &call_ts,
+                            "response_item",
+                            json!({"type":"function_call","status":"completed","id":fc_id,"name":"exec_command","arguments":fn_args,"call_id":call_id}),
+                        )?;
+                        let (ord, _, _) = rollout.emit(
+                            &res_ts,
+                            "event_msg",
+                            json!({"type":"item_completed","thread_id":tid,"turn_id":turn,"item":{"type":"CommandExecution","id":item_id,"process_id":proc_id,"command":shell_argv,"cwd":cwd,"parsed_cmd":parsed_cmd,"source":"unified_exec_startup","status":status_str,"aggregated_output":inv.result_text,"exit_code":if inv.is_error{1}else{0},"duration":{"secs":dur_ms/1000,"nanos":(dur_ms%1000)*1_000_000}},"started_at_ms":c_ms,"completed_at_ms":r_ms}),
+                        )?;
+                        rollout.emit(
+                            &res_ts,
+                            "response_item",
+                            json!({"type":"function_call_output","id":fco_id,"call_id":call_id,"output":inv.result_text}),
+                        )?;
+                        proj_items.push(ProjItem {
+                            turn: turn.clone(),
+                            id: item_id.clone(),
+                            ordinal: ord,
+                            ms: c_ms,
+                            item: json!({"type":"commandExecution","id":item_id,"pluginId":null,"scriptPath":null,"command":cmd_str,"cwd":cwd,"processId":proc_id,"source":"unifiedExecStartup","status":status_str,"commandActions":command_actions,"aggregatedOutput":inv.result_text,"exitCode":if inv.is_error{1}else{0},"durationMs":dur_ms}),
+                            kind: "commandExecution".into(),
+                        });
+                    }
+                    tools::CanonicalTool::WebSearch { query } => {
+                        let fn_args = serde_json::to_string(&json!({"query":query}))?;
+                        rollout.emit(
+                            &call_ts,
+                            "response_item",
+                            json!({"type":"function_call","status":"completed","id":fc_id,"name":"web_search","arguments":fn_args,"call_id":call_id}),
+                        )?;
+                        let (ord, _, _) = rollout.emit(
+                            &res_ts,
+                            "event_msg",
+                            json!({"type":"item_completed","thread_id":tid,"turn_id":turn,"item":{"type":"WebSearch","id":item_id,"query":query,"action":{"type":"search","query":query,"queries":null}},"started_at_ms":c_ms,"completed_at_ms":r_ms}),
+                        )?;
+                        rollout.emit(
+                            &res_ts,
+                            "response_item",
+                            json!({"type":"function_call_output","id":fco_id,"call_id":call_id,"output":inv.result_text}),
+                        )?;
+                        proj_items.push(ProjItem {
+                            turn: turn.clone(),
+                            id: item_id.clone(),
+                            ordinal: ord,
+                            ms: c_ms,
+                            item: json!({"type":"webSearch","id":item_id,"query":query,"action":{"type":"search","query":query,"queries":null},"results":null}),
+                            kind: "webSearch".into(),
+                        });
+                    }
+                    tools::CanonicalTool::Generic { name, args } => {
+                        let args_obj = if args.is_object() { args } else { json!({}) };
+                        let (server, tool_short) = if let Some(rest) = name.strip_prefix("mcp__") {
+                            if let Some((srv, tl)) = rest.split_once("__") {
+                                (srv.to_owned(), tl.to_owned())
+                            } else {
+                                ("tools".to_owned(), name.clone())
+                            }
+                        } else {
+                            ("tools".to_owned(), name.clone())
+                        };
+                        let fn_args = serde_json::to_string(&args_obj)?;
+                        rollout.emit(
+                            &call_ts,
+                            "response_item",
+                            json!({"type":"function_call","status":"completed","id":fc_id,"name":name,"arguments":fn_args,"call_id":call_id}),
+                        )?;
+                        let ev_result = if inv.is_error {
+                            Value::Null
+                        } else {
+                            json!({"content":[{"type":"text","text":inv.result_text}],"isError":false})
+                        };
+                        let (ord, _, _) = rollout.emit(
+                            &res_ts,
+                            "event_msg",
+                            json!({"type":"item_completed","thread_id":tid,"turn_id":turn,"item":{"type":"McpToolCall","id":item_id,"server":server,"tool":tool_short,"arguments":args_obj,"status":status_str,"result":ev_result,"duration":{"secs":dur_ms/1000,"nanos":(dur_ms%1000)*1_000_000}},"started_at_ms":c_ms,"completed_at_ms":r_ms}),
+                        )?;
+                        rollout.emit(
+                            &res_ts,
+                            "response_item",
+                            json!({"type":"function_call_output","id":fco_id,"call_id":call_id,"output":inv.result_text}),
+                        )?;
+                        let proj_result = if inv.is_error {
+                            Value::Null
+                        } else {
+                            json!({"content":[{"type":"text","text":inv.result_text}],"structuredContent":null,"_meta":null})
+                        };
+                        let proj_err = if inv.is_error {
+                            json!({"message":inv.result_text})
+                        } else {
+                            Value::Null
+                        };
+                        proj_items.push(ProjItem {
+                            turn: turn.clone(),
+                            id: item_id.clone(),
+                            ordinal: ord,
+                            ms: c_ms,
+                            item: json!({"type":"mcpToolCall","id":item_id,"server":server,"environmentId":null,"tool":tool_short,"status":status_str,"arguments":args_obj,"appContext":null,"mcpAppUi":null,"pluginId":null,"readOnlyHint":null,"result":proj_result,"error":proj_err,"durationMs":dur_ms}),
+                            kind: "mcpToolCall".into(),
+                        });
+                    }
+                }
             } else if kind == "compact" {
+                pos += 1;
                 let id = format!("cmp_{}", &uuid_hex()[..16]);
                 let (ord,_,_)=rollout.emit(&ts,"event_msg",json!({"type":"item_completed","thread_id":tid,"turn_id":turn,"item":{"type":"ContextCompaction","id":id},"started_at_ms":ms,"completed_at_ms":ms}))?;
                 rollout.emit(&ts,"response_item",json!({"type":"message","id":format!("msg_{}",uuid7(ms)),"role":"developer","content":[{"type":"input_text","text":text}]}))?;
@@ -478,8 +782,10 @@ pub(super) fn import(
                     kind: "contextCompaction".into(),
                 });
             } else if kind == "error" {
+                pos += 1;
                 turn_error = Some(json!({"message":text,"codex_error_info":"other"}));
             } else {
+                pos += 1;
                 rollout.emit(&ts,"response_item",json!({"type":"message","id":format!("msg_{}",uuid7(ms)),"role":"developer","content":[{"type":"input_text","text":text}]}))?;
             }
         }

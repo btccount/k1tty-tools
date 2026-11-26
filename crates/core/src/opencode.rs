@@ -1,6 +1,9 @@
 use crate::{
+    jsonl::json_serialized_len,
     process,
-    provider::{required, valid_id, OpContext, Provider, ProviderPaths},
+    provider::{
+        required, truncate_preview_item, valid_id, EntryRef, OpContext, Provider, ProviderPaths,
+    },
     storage,
 };
 use anyhow::{bail, Context, Result};
@@ -12,10 +15,14 @@ use rusqlite::{
 };
 use serde_json::{json, Map, Value};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     fs,
     path::{Path, PathBuf},
-    time::Duration,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex,
+    },
+    time::{Duration, UNIX_EPOCH},
 };
 
 const BACKUP_TABLES: [(&str, &str); 9] = [
@@ -70,8 +77,16 @@ fn iso(ms: i64) -> String {
         .unwrap_or_default()
 }
 
+struct CachedSessionItems {
+    sig: (i64, i64),
+    items: Arc<Vec<Value>>,
+    last_used: u64,
+}
+
 pub struct OpenCodeProvider {
     paths: ProviderPaths,
+    items_cache: Mutex<HashMap<(String, bool), CachedSessionItems>>,
+    cache_tick: AtomicU64,
 }
 #[derive(Clone, Debug)]
 struct Message {
@@ -84,7 +99,20 @@ struct Message {
 
 impl OpenCodeProvider {
     pub fn new(paths: ProviderPaths) -> Self {
-        Self { paths }
+        Self {
+            paths,
+            items_cache: Mutex::new(HashMap::new()),
+            cache_tick: AtomicU64::new(0),
+        }
+    }
+    fn invalidate(&self, sid: Option<&str>) {
+        let mut cache = self.items_cache.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(sid) = sid {
+            cache.remove(&(sid.to_owned(), false));
+            cache.remove(&(sid.to_owned(), true));
+        } else {
+            cache.clear();
+        }
     }
     fn db(&self) -> PathBuf {
         self.paths.root.join("opencode.db")
@@ -121,7 +149,7 @@ impl OpenCodeProvider {
             return Ok(vec![]);
         }
         let c = self.ro()?;
-        let mut stat=c.prepare("SELECT session_id,COUNT(*),COALESCE(SUM(LENGTH(data)),0) FROM session_message GROUP BY session_id")?;
+        let mut stat=c.prepare("SELECT session_id,COUNT(*),COALESCE(SUM(OCTET_LENGTH(data)),0) FROM session_message GROUP BY session_id")?;
         let stats = stat
             .query_map([], |r| {
                 Ok((
@@ -208,7 +236,76 @@ impl OpenCodeProvider {
             .collect())
     }
     fn items(&self, sid: &str) -> Result<Vec<Value>> {
-        Ok(items_from_messages(&self.messages(sid)?, false))
+        Ok(items_from_messages(&self.messages(sid)?, false, true))
+    }
+    fn cached_preview_items(&self, sid: &str, include_tools: bool) -> Result<Arc<Vec<Value>>> {
+        if !self.db().is_file() {
+            return Ok(Arc::new(Vec::new()));
+        }
+        let c = self.ro()?;
+        let sig: (i64, i64) = c.query_row(
+            "SELECT COALESCE(MAX(time_updated),0),COUNT(*) FROM session_message WHERE session_id=?",
+            [sid],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        let cache_key = (sid.to_owned(), include_tools);
+        {
+            let mut cache = self.items_cache.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(entry) = cache.get_mut(&cache_key).filter(|e| e.sig == sig) {
+                entry.last_used = self.cache_tick.fetch_add(1, Ordering::Relaxed) + 1;
+                return Ok(Arc::clone(&entry.items));
+            }
+        }
+        let mut q = c.prepare("SELECT id,type,seq,time_created,data FROM session_message WHERE session_id=? ORDER BY seq,time_created,id")?;
+        let mut rows = q.query([sid])?;
+        let mut out = Vec::new();
+        while let Some(r) = rows.next()? {
+            let id: String = r.get(0)?;
+            let kind: String = r.get(1)?;
+            let seq: i64 = r.get(2)?;
+            let created: i64 = r.get(3)?;
+            let raw: String = r.get(4)?;
+            let Ok(data) = serde_json::from_str::<Value>(&raw) else {
+                continue;
+            };
+            if !data.is_object() {
+                continue;
+            }
+            push_message_items(
+                &id,
+                &kind,
+                seq,
+                created,
+                &data,
+                false,
+                include_tools,
+                true,
+                &mut out,
+            );
+        }
+        let items = Arc::new(out);
+        let tick = self.cache_tick.fetch_add(1, Ordering::Relaxed) + 1;
+        let mut cache = self.items_cache.lock().unwrap_or_else(|e| e.into_inner());
+        while cache.len() >= 4 {
+            if let Some(old_key) = cache
+                .iter()
+                .min_by_key(|(_, v)| v.last_used)
+                .map(|(k, _)| k.clone())
+            {
+                cache.remove(&old_key);
+            } else {
+                break;
+            }
+        }
+        cache.insert(
+            cache_key,
+            CachedSessionItems {
+                sig,
+                items: Arc::clone(&items),
+                last_used: tick,
+            },
+        );
+        Ok(items)
     }
     fn load(c: &Connection, sid: &str, mid: &str) -> Result<Message> {
         let(id,kind,seq,created,raw):(String,String,i64,i64,String)=c.query_row("SELECT id,type,seq,time_created,data FROM session_message WHERE id=? AND session_id=?",params![mid,sid],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?))).with_context(||format!("Сообщение {mid} не найдено в сессии {sid}"))?;
@@ -338,8 +435,9 @@ impl OpenCodeProvider {
             "UPDATE session_v2 SET time_updated=? WHERE id=?",
             params![now, sid],
         )?;
-        quick_check(&tx)?;
         tx.commit()?;
+        wal_checkpoint(&c, false);
+        self.invalidate(Some(sid));
         Ok(json!({"session_id":sid,"key":key,"seq":m.seq,"integrity_check":"ok"}))
     }
     fn delete_single(&self, sid: &str, key: &str) -> Result<Value> {
@@ -382,6 +480,8 @@ impl OpenCodeProvider {
             params![now, sid],
         )?;
         tx.commit()?;
+        wal_checkpoint(&c, false);
+        self.invalidate(Some(sid));
         Ok(json!({"session_id":sid,"key":key,"seq":m.seq,"deleted_row":deleted}))
     }
     fn preview_cut(&self, sid: &str, key: &str, mode: &str) -> Result<Value> {
@@ -441,13 +541,14 @@ impl OpenCodeProvider {
             "UPDATE session_v2 SET time_updated=?,revert=NULL WHERE id=?",
             params![now, sid],
         )?;
-        quick_check(&tx)?;
         let left: i64 = tx.query_row(
             "SELECT COUNT(*) FROM session_message WHERE session_id=?",
             [sid],
             |r| r.get(0),
         )?;
         tx.commit()?;
+        wal_checkpoint(&c, false);
+        self.invalidate(Some(sid));
         Ok(
             json!({"session_id":sid,"mode":mode,"removed_rows":removed,"rows_after":left,"integrity_check":"ok"}),
         )
@@ -482,7 +583,7 @@ impl OpenCodeProvider {
         {
             bail!("Сессия OpenCode {sid} не найдена");
         }
-        let title = snapshot_title(&Value::Object(snap.clone()));
+        let title = snapshot_title_map(&snap);
         let stamp = Local::now().format("%Y%m%d-%H%M%S-%6f").to_string();
         let dir = self
             .paths
@@ -598,6 +699,8 @@ impl OpenCodeProvider {
         }
         quick_check(&tx)?;
         tx.commit()?;
+        wal_checkpoint(&c, true);
+        self.invalidate(Some(sid));
         Ok(json!({"session_id":sid,"restored_tables":counts,"integrity_check":"ok"}))
     }
     fn backups(&self, cid: Option<&str>) -> Result<Value> {
@@ -703,7 +806,12 @@ impl OpenCodeProvider {
             }
         }
         messages.sort_by(|a, b| (a.seq, a.created, &a.id).cmp(&(b.seq, b.created, &b.id)));
-        let mut result = page(items_from_messages(&messages, true), data, &sid);
+        let include_tools = data["include_tools"].as_bool().unwrap_or(false);
+        let mut built = items_from_messages(&messages, true, include_tools);
+        for item in &mut built {
+            truncate_preview_item(item);
+        }
+        let mut result = page_slice(&built, data, &sid);
         let mut title = snapshot_title(&snap["tables"]);
         if title.is_empty() {
             title = storage::read_json(&bdir.join("backup.meta.json"))
@@ -728,21 +836,131 @@ impl OpenCodeProvider {
             .find(|v| v["id"] == sid)
             .unwrap_or(Value::Null);
         let mut entries = Vec::new();
-        for item in self.items(sid)? {
-            let kind = s(&item["kind"]);
-            let body = s(&item["text"]);
-            let sub = s(&item["subtype"]);
-            if body.trim().is_empty() && sub == "thinking" {
-                continue;
-            }
-            if include_tools {
-                if body.trim().is_empty() && item["tool"].as_str().is_none_or(str::is_empty) {
-                    continue;
+        for m in self.messages(sid)? {
+            let ts = iso(m.created);
+            let d = &m.data;
+            match m.kind.as_str() {
+                "user" => {
+                    let body = text(
+                        d.get("text")
+                            .filter(|v| !v.is_null())
+                            .unwrap_or(&d["metadata"]["displayText"]),
+                    );
+                    if !body.trim().is_empty() {
+                        entries.push(json!({"kind":"user","subtype":"user","label":"Вы","text":body,"ts":ts,"tool":Value::Null,"status":Value::Null,"code":""}));
+                    }
                 }
-            } else if !matches!(kind, "user" | "assistant" | "compact") || body.trim().is_empty() {
-                continue;
+                "assistant" => {
+                    if let Some(parts) = d["content"].as_array() {
+                        for p in parts {
+                            if !p.is_object() {
+                                continue;
+                            }
+                            let ptype = s(&p["type"]);
+                            if !include_tools && ptype != "text" {
+                                continue;
+                            }
+                            let pts = iso(p["time"]["created"]
+                                .as_i64()
+                                .filter(|t| *t != 0)
+                                .unwrap_or(m.created));
+                            match ptype {
+                                "text" => {
+                                    let body = text(&p["text"]);
+                                    if body.trim().is_empty() && parts.len() > 1 {
+                                        continue;
+                                    }
+                                    if !body.trim().is_empty() {
+                                        entries.push(json!({"kind":"assistant","subtype":"text","label":"OpenCode","text":body,"ts":pts,"tool":Value::Null,"status":Value::Null,"code":""}));
+                                    }
+                                }
+                                "reasoning" => {
+                                    let body = text(&p["text"]);
+                                    if !body.trim().is_empty() {
+                                        entries.push(json!({"kind":"tool","subtype":"thinking","label":"Размышления","text":body,"ts":pts,"tool":"reasoning","status":"ok","code":""}));
+                                    }
+                                }
+                                "tool" => {
+                                    let name = p["name"]
+                                        .as_str()
+                                        .filter(|s| !s.is_empty())
+                                        .unwrap_or("tool");
+                                    let status = if p["state"]["status"] == "error" {
+                                        "error"
+                                    } else {
+                                        "ok"
+                                    };
+                                    let has_input = p["state"]["input"]
+                                        .as_object()
+                                        .is_some_and(|o| !o.is_empty());
+                                    let (out_body, out_mode) = tool_text(p);
+                                    let has_output =
+                                        out_mode != "none" && out_mode != "state_input";
+                                    if has_input && has_output {
+                                        let args_str = serde_json::to_string(&p["state"]["input"])
+                                            .unwrap_or_else(|_| "{}".into());
+                                        entries.push(json!({"kind":"tool","subtype":"tool_use","label":name,"text":args_str,"ts":pts,"tool":name,"status":"ok","code":""}));
+                                        entries.push(json!({"kind":"tool","subtype":"tool_result","label":name,"text":out_body,"ts":pts,"tool":name,"status":status,"code":""}));
+                                    } else {
+                                        let body = tool_display(p);
+                                        if body.trim().is_empty() && name.is_empty() {
+                                            continue;
+                                        }
+                                        let subtype = if !has_input && has_output {
+                                            "tool_output"
+                                        } else {
+                                            "tool_use"
+                                        };
+                                        entries.push(json!({"kind":"tool","subtype":subtype,"label":name,"text":body,"ts":pts,"tool":name,"status":status,"code":""}));
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    if include_tools && truthy(&d["error"]) {
+                        let e = &d["error"];
+                        let code = if e.is_object() {
+                            text(&e["type"])
+                        } else {
+                            String::new()
+                        };
+                        let body = if e.is_object() {
+                            if s(&e["message"]).is_empty() {
+                                e.to_string()
+                            } else {
+                                text(&e["message"])
+                            }
+                        } else {
+                            text(e)
+                        };
+                        if !body.trim().is_empty() {
+                            entries.push(json!({"kind":"error","subtype":"error","label":"Ошибка OpenCode","text":body,"ts":ts,"tool":Value::Null,"status":"error","code":code}));
+                        }
+                    }
+                }
+                "compaction" => {
+                    let body = text(&d["summary"]);
+                    if !body.trim().is_empty() {
+                        entries.push(json!({"kind":"compact","subtype":"compaction","label":"Компакция","text":body,"ts":ts,"tool":Value::Null,"status":Value::Null,"code":""}));
+                    }
+                }
+                "system" | "synthetic" if include_tools => {
+                    let body = text(&d["text"]);
+                    if !body.trim().is_empty() {
+                        let label = d["description"]
+                            .as_str()
+                            .filter(|s| !s.is_empty())
+                            .unwrap_or(if m.kind == "system" {
+                                "Система"
+                            } else {
+                                "Служебное"
+                            });
+                        entries.push(json!({"kind":"system","subtype":m.kind,"label":label,"text":body,"ts":ts,"tool":Value::Null,"status":Value::Null,"code":""}));
+                    }
+                }
+                _ => {}
             }
-            entries.push(json!({"kind":kind,"subtype":sub,"label":item["label"],"text":body,"ts":item["ts"],"tool":item["tool"],"status":item["status"],"code":item["code"]}));
         }
         let mut title = text(&session["title"]);
         if title.trim().is_empty() {
@@ -778,7 +996,6 @@ impl OpenCodeProvider {
         )
     }
     fn preview_slim(&self, sid: &str, data: &Value) -> Result<Value> {
-        let messages = self.messages(sid)?;
         let threshold = (data["tool_threshold_kb"]
             .as_u64()
             .unwrap_or(4)
@@ -788,19 +1005,30 @@ impl OpenCodeProvider {
         let mut thinking_bytes = 0usize;
         let mut heavy_tool_count = 0usize;
         let mut heavy_tool_bytes = 0usize;
-        for m in &messages {
-            if let Some(parts) = m.data["content"].as_array() {
-                for p in parts {
-                    let typ = s(&p["type"]);
-                    if matches!(typ, "reasoning" | "thinking") {
-                        let sz = serde_json::to_vec(p).map(|b| b.len()).unwrap_or(0);
-                        thinking_count += 1;
-                        thinking_bytes += sz;
-                    } else if typ == "tool" {
-                        let sz = p["state"]["output"].as_str().map(str::len).unwrap_or(0);
-                        if sz > threshold {
-                            heavy_tool_count += 1;
-                            heavy_tool_bytes += sz.saturating_sub(48);
+        if self.db().is_file() {
+            let c = self.ro()?;
+            let mut q = c.prepare(
+                "SELECT data FROM session_message WHERE session_id=? ORDER BY seq,time_created,id",
+            )?;
+            let mut rows = q.query([sid])?;
+            while let Some(r) = rows.next()? {
+                let raw: String = r.get(0)?;
+                let Ok(mdata) = serde_json::from_str::<Value>(&raw) else {
+                    continue;
+                };
+                if let Some(parts) = mdata["content"].as_array() {
+                    for p in parts {
+                        let typ = s(&p["type"]);
+                        if matches!(typ, "reasoning" | "thinking") {
+                            let sz = json_serialized_len(p);
+                            thinking_count += 1;
+                            thinking_bytes += sz;
+                        } else if typ == "tool" {
+                            let sz = p["state"]["output"].as_str().map(str::len).unwrap_or(0);
+                            if sz > threshold {
+                                heavy_tool_count += 1;
+                                heavy_tool_bytes += sz.saturating_sub(48);
+                            }
                         }
                     }
                 }
@@ -844,19 +1072,32 @@ impl OpenCodeProvider {
         if !remove_thinking && !trim_heavy_tools {
             bail!("Выберите хотя бы одну опцию очистки.");
         }
-        let messages = self.messages(sid)?;
         let mut c = self.rw()?;
         let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let rows: Vec<(String, String)> = {
+            let mut q = tx.prepare("SELECT id,data FROM session_message WHERE session_id=? ORDER BY seq,time_created,id")?;
+            let list = q
+                .query_map([sid], |r| {
+                    Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            list
+        };
         let now = Utc::now().timestamp_millis();
         let mut thinking_removed = 0usize;
         let mut tools_trimmed = 0usize;
         let mut freed_bytes = 0usize;
-        for mut m in messages {
-            let before = serde_json::to_vec(&m.data).map(|b| b.len()).unwrap_or(0);
-            let has_error = truthy(&m.data["error"]);
+        for (mid, raw) in rows {
+            let Ok(mut mdata) = serde_json::from_str::<Value>(&raw) else {
+                continue;
+            };
+            if !mdata.is_object() {
+                continue;
+            }
+            let has_error = truthy(&mdata["error"]);
             let mut changed = false;
             let mut drop_row = false;
-            if let Some(parts) = m.data.get_mut("content").and_then(Value::as_array_mut) {
+            if let Some(parts) = mdata.get_mut("content").and_then(Value::as_array_mut) {
                 let mut next = Vec::with_capacity(parts.len());
                 for mut p in parts.drain(..) {
                     let typ = s(&p["type"]).to_owned();
@@ -892,16 +1133,20 @@ impl OpenCodeProvider {
             if !changed {
                 continue;
             }
+            let before = raw.len();
             if drop_row {
                 freed_bytes += before;
                 tx.execute(
                     "DELETE FROM session_message WHERE id=? AND session_id=?",
-                    params![m.id, sid],
+                    params![mid, sid],
                 )?;
             } else {
-                let after = serde_json::to_vec(&m.data).map(|b| b.len()).unwrap_or(0);
-                freed_bytes += before.saturating_sub(after);
-                update_message(&tx, sid, &m, now)?;
+                let serialized = serde_json::to_string(&mdata)?;
+                freed_bytes += before.saturating_sub(serialized.len());
+                tx.execute(
+                    "UPDATE session_message SET data=?,time_updated=? WHERE id=? AND session_id=?",
+                    params![serialized, now, mid, sid],
+                )?;
             }
         }
         if thinking_removed == 0 && tools_trimmed == 0 {
@@ -920,8 +1165,9 @@ impl OpenCodeProvider {
             "UPDATE session_v2 SET time_updated=? WHERE id=?",
             params![now, sid],
         )?;
-        quick_check(&tx)?;
         tx.commit()?;
+        wal_checkpoint(&c, false);
+        self.invalidate(Some(sid));
         Ok(json!({
             "provider": "opencode",
             "cid": sid,
@@ -937,6 +1183,92 @@ impl OpenCodeProvider {
 impl Provider for OpenCodeProvider {
     fn paths(&self) -> &ProviderPaths {
         &self.paths
+    }
+    fn content_signature(&self, _cid: &str) -> Option<String> {
+        let db = self.db();
+        let (db_len, db_mtime) = file_stat_sig(&db)?;
+        let wal = PathBuf::from(format!("{}-wal", db.display()));
+        let (wal_len, wal_mtime) = file_stat_sig(&wal).unwrap_or((0, 0));
+        Some(format!("{db_len}:{db_mtime}:{wal_len}:{wal_mtime}"))
+    }
+    fn visit_entries(&self, cid: &str, f: &mut dyn FnMut(EntryRef<'_>) -> bool) -> Result<()> {
+        valid_id(cid)?;
+        if !self.db().is_file() {
+            return Ok(());
+        }
+        let c = self.ro()?;
+        let mut q = c.prepare(
+            "SELECT id,type,time_created,data FROM session_message WHERE session_id=? ORDER BY seq,time_created,id",
+        )?;
+        let mut rows = q.query([cid])?;
+        while let Some(r) = rows.next()? {
+            let id: String = r.get(0)?;
+            let kind: String = r.get(1)?;
+            let created: i64 = r.get(2)?;
+            let raw: String = r.get(3)?;
+            let Ok(data) = serde_json::from_str::<Value>(&raw) else {
+                continue;
+            };
+            if !data.is_object() {
+                continue;
+            }
+            if !visit_message_entries(&id, &kind, created, &data, f) {
+                break;
+            }
+        }
+        Ok(())
+    }
+    fn read_entry_text(&self, cid: &str, key: &str) -> Result<Option<String>> {
+        valid_id(cid)?;
+        let Ok((k, mid, part)) = parse_key(key) else {
+            return Ok(None);
+        };
+        if !self.db().is_file() {
+            return Ok(None);
+        }
+        let m = Self::load(&self.ro()?, cid, mid)?;
+        let d = &m.data;
+        let out = match k {
+            "m" => match m.kind.as_str() {
+                "user" => Some(text(
+                    d.get("text")
+                        .filter(|v| !v.is_null())
+                        .unwrap_or(&d["metadata"]["displayText"]),
+                )),
+                "compaction" => Some(text(&d["summary"])),
+                "system" | "synthetic" => Some(text(&d["text"])),
+                _ => None,
+            },
+            "e" => {
+                if truthy(&d["error"]) {
+                    let e = &d["error"];
+                    let body = if e.is_object() {
+                        if s(&e["message"]).is_empty() {
+                            e.to_string()
+                        } else {
+                            text(&e["message"])
+                        }
+                    } else {
+                        text(e)
+                    };
+                    Some(body)
+                } else {
+                    None
+                }
+            }
+            _ => {
+                let i = part.unwrap();
+                match d["content"].get(i).filter(|p| p.is_object()) {
+                    Some(p) => match s(&p["type"]) {
+                        "text" | "reasoning" => Some(text(&p["text"])),
+                        "tool" => Some(tool_display(p)),
+                        _ => None,
+                    },
+                    None => None,
+                }
+            }
+        };
+        Ok(out)
     }
     fn probe_lock(&self, _cid: Option<&str>) -> Result<Option<String>> {
         if !self.db().is_file() {
@@ -956,43 +1288,129 @@ impl Provider for OpenCodeProvider {
         if let Some(id) = data["cid"].as_str() {
             valid_id(id)?;
         }
-        match op{
-            "state"=>{
-                let running=process::snapshot().remove("opencode").unwrap_or_default();let available=self.db().is_file();let blocked=self.probe_lock(None)?.is_some();
-                let note=if !available{format!("База данных не найдена: {}",self.db().display())}else if blocked{format!("База занята ({}). Закройте OpenCode для правки.",process::format_running(&running))}else if !running.is_empty(){format!("Запущено: {}. Переоткройте диалог в OpenCode после правки.",process::format_running(&running))}else{"Файлы свободны.".into()};
-                Ok(json!({"id":"opencode","name":"OpenCode","short":"OC","available":available,"writable":available&&!blocked,"blocked":blocked,"running":running,"test":false,"appdata":self.paths.root,"backups_root":self.paths.backup_root,"note":note}))
-            }
-            "convs"=>Ok(Value::Array(self.sessions()?.into_iter().map(|v|{
-                let count=v["msg_count"].as_i64().unwrap_or(0);let dname=Path::new(s(&v["directory"])).file_name().unwrap_or_default().to_string_lossy();
-                json!({"provider":"opencode","id":v["id"],"title":v["title"],"subtitle":if s(&v["directory"]).is_empty(){&v["slug"]}else{&v["directory"]},"badge":if count>0{format!("{count} ш.")}else if !dname.is_empty(){chars(&dname,16)}else{"OC".into()},"size":v["size"],"mtime":v["mtime"],"mtime_ts":v["mtime_ts"],"writable":true})
-            }).collect())),
-            "entries"=>{let sid=required(data,"cid")?;let mut result=page(self.items(sid)?,data,sid);let reason=self.probe_lock(Some(sid))?;result["file_locked"]=json!(reason.is_some());result["lock_reason"]=json!(reason.unwrap_or_default());Ok(result)}
-            "edit_preview"=>self.preview_edit(required(data,"cid")?,required(data,"key")?),
-            "preview_cut"=>self.preview_cut(required(data,"cid")?,required(data,"key")?,data["mode"].as_str().unwrap_or("tail")),
-            "preview_slim"=>self.preview_slim(required(data,"cid")?,data),
-            "backups"=>self.backups(data["cid"].as_str().filter(|s|!s.is_empty())),
-            "backup_entries"=>self.backup_entries(data),
-            "export_chat"=>self.export(required(data,"cid")?,data["include_tools"].as_bool().unwrap_or(true)),
-            "restore"=>{let dir=storage::backup_path(&self.paths.backup_root,required(data,"backup_dir")?)?;self.gate()?;ctx.phase("restore");self.restore(&dir)?;ctx.phase("done");Ok(json!({"restored":dir,"provider":"opencode"}))}
-            "apply_edit"|"apply_cut"|"apply_slim"|"delete_single"|"delete_conv"=>{
-                let sid=required(data,"cid")?;let warns=self.gate()?;let mode=data["mode"].as_str().unwrap_or("tail");if op=="apply_cut"&&!matches!(mode,"head"|"tail"){bail!("Недопустимый режим обрезки.");}
-                let tag=match op{"apply_edit"=>"edit".into(),"apply_cut"=>format!("cut_{mode}"),"apply_slim"=>"slim".into(),"delete_single"=>"del_single".into(),_=>"delete_conv".into()};
-                if op=="apply_edit"&&s(&data["text"]).trim().is_empty(){bail!("Пустой текст, сохранение отменено.");}
-                let backup=if ctx.auto_backup{ctx.phase("backup");Some(self.backup(sid,&tag)?)}else{None};ctx.phase(if op=="apply_edit"{"edit"}else{"cut"});
-                let result=match op{
-                    "apply_edit"=>self.edit(sid,required(data,"key")?,s(&data["text"])),
-                    "apply_cut"=>self.cut(sid,required(data,"key")?,mode),
-                    "apply_slim"=>self.apply_slim(sid,data),
-                    "delete_single"=>self.delete_single(sid,required(data,"key")?),
-                    _=>{
-                        (||->Result<Value>{let mut c=self.rw()?;let tx=c.transaction_with_behavior(TransactionBehavior::Immediate)?;
-                        let tables=table_names(&tx)?;for(name,id_col)in BACKUP_TABLES.into_iter().rev(){if name=="session_v2"||!tables.iter().any(|t|t==name){continue;}tx.execute(&format!("DELETE FROM \"{name}\" WHERE \"{id_col}\"=?"),[sid])?;}
-                        if tx.execute("DELETE FROM session_v2 WHERE id=?",[sid])?==0{bail!("Сессия OpenCode {sid} не найдена");}tx.commit()?;Ok(json!({"deleted":sid,"provider":"opencode"}))})()
-                    }
+        match op {
+            "state" => {
+                let running = process::snapshot().remove("opencode").unwrap_or_default();
+                let available = self.db().is_file();
+                let blocked = self.probe_lock(None)?.is_some();
+                let note = if !available {
+                    format!("База данных не найдена: {}", self.db().display())
+                } else if blocked {
+                    format!(
+                        "База занята ({}). Закройте OpenCode для правки.",
+                        process::format_running(&running)
+                    )
+                } else if !running.is_empty() {
+                    format!(
+                        "Запущено: {}. Переоткройте диалог в OpenCode после правки.",
+                        process::format_running(&running)
+                    )
+                } else {
+                    "Файлы свободны.".into()
                 };
-                let mut result=result?;result["backup"]=json!(backup);result["warns"]=json!(warns);ctx.phase("done");Ok(result)
+                Ok(
+                    json!({"id":"opencode","name":"OpenCode","short":"OC","available":available,"writable":available&&!blocked,"blocked":blocked,"running":running,"test":false,"appdata":self.paths.root,"backups_root":self.paths.backup_root,"note":note}),
+                )
             }
-            _=>bail!("Неизвестная операция OpenCode: {op}"),
+            "convs" => {
+                if data["refresh"].as_bool().unwrap_or(false) {
+                    self.invalidate(None);
+                }
+                Ok(Value::Array(self.sessions()?.into_iter().map(|v|{
+                    let count=v["msg_count"].as_i64().unwrap_or(0);let dname=Path::new(s(&v["directory"])).file_name().unwrap_or_default().to_string_lossy();
+                    json!({"provider":"opencode","id":v["id"],"title":v["title"],"subtitle":if s(&v["directory"]).is_empty(){&v["slug"]}else{&v["directory"]},"badge":if count>0{format!("{count} ш.")}else if !dname.is_empty(){chars(&dname,16)}else{"OC".into()},"size":v["size"],"mtime":v["mtime"],"mtime_ts":v["mtime_ts"],"writable":true})
+                }).collect()))
+            }
+            "entries" => {
+                let sid = required(data, "cid")?;
+                let include_tools = data["include_tools"].as_bool().unwrap_or(false);
+                let items = self.cached_preview_items(sid, include_tools)?;
+                let mut result = page_slice(&items, data, sid);
+                let reason = self.probe_lock(Some(sid))?;
+                result["file_locked"] = json!(reason.is_some());
+                result["lock_reason"] = json!(reason.unwrap_or_default());
+                Ok(result)
+            }
+            "edit_preview" => self.preview_edit(required(data, "cid")?, required(data, "key")?),
+            "preview_cut" => self.preview_cut(
+                required(data, "cid")?,
+                required(data, "key")?,
+                data["mode"].as_str().unwrap_or("tail"),
+            ),
+            "preview_slim" => self.preview_slim(required(data, "cid")?, data),
+            "backups" => self.backups(data["cid"].as_str().filter(|s| !s.is_empty())),
+            "backup_entries" => self.backup_entries(data),
+            "export_chat" => self.export(
+                required(data, "cid")?,
+                data["include_tools"].as_bool().unwrap_or(true),
+            ),
+            "restore" => {
+                let dir =
+                    storage::backup_path(&self.paths.backup_root, required(data, "backup_dir")?)?;
+                self.gate()?;
+                ctx.phase("restore");
+                self.restore(&dir)?;
+                ctx.phase("done");
+                Ok(json!({"restored":dir,"provider":"opencode"}))
+            }
+            "apply_edit" | "apply_cut" | "apply_slim" | "delete_single" | "delete_conv" => {
+                let sid = required(data, "cid")?;
+                let warns = self.gate()?;
+                let mode = data["mode"].as_str().unwrap_or("tail");
+                if op == "apply_cut" && !matches!(mode, "head" | "tail") {
+                    bail!("Недопустимый режим обрезки.");
+                }
+                let tag = match op {
+                    "apply_edit" => "edit".into(),
+                    "apply_cut" => format!("cut_{mode}"),
+                    "apply_slim" => "slim".into(),
+                    "delete_single" => "del_single".into(),
+                    _ => "delete_conv".into(),
+                };
+                if op == "apply_edit" && s(&data["text"]).trim().is_empty() {
+                    bail!("Пустой текст, сохранение отменено.");
+                }
+                let backup = if ctx.auto_backup {
+                    ctx.phase("backup");
+                    Some(self.backup(sid, &tag)?)
+                } else {
+                    None
+                };
+                ctx.phase(if op == "apply_edit" { "edit" } else { "cut" });
+                let result = match op {
+                    "apply_edit" => self.edit(sid, required(data, "key")?, s(&data["text"])),
+                    "apply_cut" => self.cut(sid, required(data, "key")?, mode),
+                    "apply_slim" => self.apply_slim(sid, data),
+                    "delete_single" => self.delete_single(sid, required(data, "key")?),
+                    _ => (|| -> Result<Value> {
+                        let mut c = self.rw()?;
+                        let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+                        let tables = table_names(&tx)?;
+                        for (name, id_col) in BACKUP_TABLES.into_iter().rev() {
+                            if name == "session_v2" || !tables.iter().any(|t| t == name) {
+                                continue;
+                            }
+                            tx.execute(
+                                &format!("DELETE FROM \"{name}\" WHERE \"{id_col}\"=?"),
+                                [sid],
+                            )?;
+                        }
+                        if tx.execute("DELETE FROM session_v2 WHERE id=?", [sid])? == 0 {
+                            bail!("Сессия OpenCode {sid} не найдена");
+                        }
+                        tx.commit()?;
+                        wal_checkpoint(&c, true);
+                        self.invalidate(Some(sid));
+                        Ok(json!({"deleted":sid,"provider":"opencode"}))
+                    })(),
+                };
+                let mut result = result?;
+                result["backup"] = json!(backup);
+                result["warns"] = json!(warns);
+                ctx.phase("done");
+                Ok(result)
+            }
+            _ => bail!("Неизвестная операция OpenCode: {op}"),
         }
     }
 }
@@ -1076,8 +1494,9 @@ fn tool_display(p: &Value) -> String {
     }
     lines.join("\n").trim().to_owned()
 }
-fn item(
-    m: &Message,
+fn build_item(
+    msg_id: &str,
+    seq: i64,
     key: String,
     kind: &str,
     subtype: &str,
@@ -1088,6 +1507,7 @@ fn item(
     status: Value,
     code: String,
     readonly: bool,
+    truncate: bool,
 ) -> Value {
     let actions = if readonly {
         vec![]
@@ -1096,191 +1516,405 @@ fn item(
     } else {
         vec!["edit", "del_single", "cut_tail"]
     };
-    json!({"key":key,"msg_id":m.id,"seq":m.seq,"kind":kind,"subtype":subtype,"label":label,"text":body,"ts":ts,"tool":tool,"status":status,"code":code,"in_db":true,"actions":actions})
+    let mut val = json!({"key":key,"msg_id":msg_id,"seq":seq,"kind":kind,"subtype":subtype,"label":label,"text":body,"ts":ts,"tool":tool,"status":status,"code":code,"in_db":true,"actions":actions});
+    if truncate {
+        truncate_preview_item(&mut val);
+    }
+    val
 }
-fn items_from_messages(messages: &[Message], readonly: bool) -> Vec<Value> {
-    let mut out = Vec::new();
-    for m in messages {
-        let d = &m.data;
-        let ts = iso(m.created);
-        let key = format!("m:{}", m.id);
-        match m.kind.as_str() {
-            "user" => out.push(item(
-                m,
-                key,
-                "user",
-                "user",
-                "Вы",
-                text(
-                    d.get("text")
-                        .filter(|v| !v.is_null())
-                        .unwrap_or(&d["metadata"]["displayText"]),
-                ),
-                ts,
-                Value::Null,
-                Value::Null,
-                String::new(),
-                readonly,
-            )),
-            "assistant" => {
-                if let Some(parts) = d["content"].as_array() {
-                    for (i, p) in parts.iter().enumerate() {
-                        if !p.is_object() {
-                            continue;
-                        }
-                        let pts = iso(p["time"]["created"]
-                            .as_i64()
-                            .filter(|t| *t != 0)
-                            .unwrap_or(m.created));
-                        let key = format!("p:{}:{i}", m.id);
-                        let mut v = match s(&p["type"]) {
-                            "text" => {
-                                let body = text(&p["text"]);
-                                if body.trim().is_empty() && parts.len() > 1 {
-                                    continue;
-                                }
-                                item(
-                                    m,
-                                    key,
-                                    "assistant",
-                                    "text",
-                                    "OpenCode",
-                                    body,
-                                    pts,
-                                    Value::Null,
-                                    Value::Null,
-                                    String::new(),
-                                    readonly,
-                                )
+fn push_message_items(
+    msg_id: &str,
+    msg_kind: &str,
+    seq: i64,
+    created: i64,
+    d: &Value,
+    readonly: bool,
+    include_tools: bool,
+    truncate: bool,
+    out: &mut Vec<Value>,
+) {
+    let ts = iso(created);
+    let key = format!("m:{msg_id}");
+    match msg_kind {
+        "user" => out.push(build_item(
+            msg_id,
+            seq,
+            key,
+            "user",
+            "user",
+            "Вы",
+            text(
+                d.get("text")
+                    .filter(|v| !v.is_null())
+                    .unwrap_or(&d["metadata"]["displayText"]),
+            ),
+            ts,
+            Value::Null,
+            Value::Null,
+            String::new(),
+            readonly,
+            truncate,
+        )),
+        "assistant" => {
+            if let Some(parts) = d["content"].as_array() {
+                for (i, p) in parts.iter().enumerate() {
+                    if !p.is_object() {
+                        continue;
+                    }
+                    let ptype = s(&p["type"]);
+                    if !include_tools && ptype != "text" {
+                        continue;
+                    }
+                    let pts = iso(p["time"]["created"]
+                        .as_i64()
+                        .filter(|t| *t != 0)
+                        .unwrap_or(created));
+                    let key = format!("p:{msg_id}:{i}");
+                    let mut v = match ptype {
+                        "text" => {
+                            let body = text(&p["text"]);
+                            if body.trim().is_empty() && parts.len() > 1 {
+                                continue;
                             }
-                            "reasoning" => item(
-                                m,
+                            build_item(
+                                msg_id,
+                                seq,
                                 key,
-                                "tool",
-                                "thinking",
-                                "Размышления",
-                                text(&p["text"]),
+                                "assistant",
+                                "text",
+                                "OpenCode",
+                                body,
                                 pts,
-                                json!("reasoning"),
-                                json!("ok"),
+                                Value::Null,
+                                Value::Null,
                                 String::new(),
                                 readonly,
-                            ),
-                            "tool" => {
-                                let name = p["name"]
-                                    .as_str()
-                                    .filter(|s| !s.is_empty())
-                                    .unwrap_or("tool");
-                                item(
-                                    m,
-                                    key,
-                                    "tool",
-                                    "tool_use",
-                                    name,
-                                    tool_display(p),
-                                    pts,
-                                    json!(name),
-                                    json!(if p["state"]["status"] == "error" {
-                                        "error"
-                                    } else {
-                                        "ok"
-                                    }),
-                                    String::new(),
-                                    readonly,
-                                )
-                            }
-                            _ => continue,
-                        };
-                        v["part_idx"] = json!(i);
-                        out.push(v);
-                    }
-                }
-                if truthy(&d["error"]) {
-                    let e = &d["error"];
-                    let code = if e.is_object() {
-                        text(&e["type"])
-                    } else {
-                        String::new()
-                    };
-                    let body = if e.is_object() {
-                        if s(&e["message"]).is_empty() {
-                            e.to_string()
-                        } else {
-                            text(&e["message"])
+                                truncate,
+                            )
                         }
-                    } else {
-                        text(e)
+                        "reasoning" => build_item(
+                            msg_id,
+                            seq,
+                            key,
+                            "tool",
+                            "thinking",
+                            "Размышления",
+                            text(&p["text"]),
+                            pts,
+                            json!("reasoning"),
+                            json!("ok"),
+                            String::new(),
+                            readonly,
+                            truncate,
+                        ),
+                        "tool" => {
+                            let name = p["name"]
+                                .as_str()
+                                .filter(|s| !s.is_empty())
+                                .unwrap_or("tool");
+                            build_item(
+                                msg_id,
+                                seq,
+                                key,
+                                "tool",
+                                "tool_use",
+                                name,
+                                tool_display(p),
+                                pts,
+                                json!(name),
+                                json!(if p["state"]["status"] == "error" {
+                                    "error"
+                                } else {
+                                    "ok"
+                                }),
+                                String::new(),
+                                readonly,
+                                truncate,
+                            )
+                        }
+                        _ => continue,
                     };
-                    out.push(item(
-                        m,
-                        format!("e:{}", m.id),
-                        "error",
-                        "error",
-                        "Ошибка OpenCode",
-                        body,
-                        ts,
-                        Value::Null,
-                        json!("error"),
-                        code,
-                        readonly,
-                    ));
+                    v["part_idx"] = json!(i);
+                    out.push(v);
                 }
             }
-            "compaction" => out.push(item(
-                m,
+            if truthy(&d["error"]) {
+                let e = &d["error"];
+                let code = if e.is_object() {
+                    text(&e["type"])
+                } else {
+                    String::new()
+                };
+                let body = if e.is_object() {
+                    if s(&e["message"]).is_empty() {
+                        e.to_string()
+                    } else {
+                        text(&e["message"])
+                    }
+                } else {
+                    text(e)
+                };
+                out.push(build_item(
+                    msg_id,
+                    seq,
+                    format!("e:{msg_id}"),
+                    "error",
+                    "error",
+                    "Ошибка OpenCode",
+                    body,
+                    ts,
+                    Value::Null,
+                    json!("error"),
+                    code,
+                    readonly,
+                    truncate,
+                ));
+            }
+        }
+        "compaction" if include_tools => out.push(build_item(
+            msg_id,
+            seq,
+            key,
+            "compact",
+            "compaction",
+            "Компакция",
+            text(&d["summary"]),
+            ts,
+            Value::Null,
+            Value::Null,
+            String::new(),
+            readonly,
+            truncate,
+        )),
+        "system" | "synthetic" if include_tools => {
+            let label = d["description"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .unwrap_or(if msg_kind == "system" {
+                    "Система"
+                } else {
+                    "Служебное"
+                });
+            out.push(build_item(
+                msg_id,
+                seq,
                 key,
-                "compact",
-                "compaction",
-                "Компакция",
-                text(&d["summary"]),
+                "system",
+                msg_kind,
+                label,
+                text(&d["text"]),
                 ts,
                 Value::Null,
                 Value::Null,
                 String::new(),
                 readonly,
-            )),
-            "system" | "synthetic" => {
-                let label = d["description"]
-                    .as_str()
-                    .filter(|s| !s.is_empty())
-                    .unwrap_or(if m.kind == "system" {
-                        "Система"
-                    } else {
-                        "Служебное"
-                    });
-                out.push(item(
-                    m,
-                    key,
-                    "system",
-                    &m.kind,
-                    label,
-                    text(&d["text"]),
-                    ts,
-                    Value::Null,
-                    Value::Null,
-                    String::new(),
-                    readonly,
-                ));
-            }
-            _ => {}
+                truncate,
+            ));
         }
+        _ => {}
+    }
+}
+fn visit_message_entries(
+    msg_id: &str,
+    msg_kind: &str,
+    created: i64,
+    d: &Value,
+    f: &mut dyn FnMut(EntryRef<'_>) -> bool,
+) -> bool {
+    let ts = iso(created);
+    let key = format!("m:{msg_id}");
+    match msg_kind {
+        "user" => {
+            let body = text(
+                d.get("text")
+                    .filter(|v| !v.is_null())
+                    .unwrap_or(&d["metadata"]["displayText"]),
+            );
+            f(EntryRef {
+                key: &key,
+                kind: "user",
+                subtype: "user",
+                label: "Вы",
+                ts: &ts,
+                text: &body,
+            })
+        }
+        "assistant" => {
+            if let Some(parts) = d["content"].as_array() {
+                for (i, p) in parts.iter().enumerate() {
+                    if !p.is_object() {
+                        continue;
+                    }
+                    let pts = iso(p["time"]["created"]
+                        .as_i64()
+                        .filter(|t| *t != 0)
+                        .unwrap_or(created));
+                    let pkey = format!("p:{msg_id}:{i}");
+                    let keep = match s(&p["type"]) {
+                        "text" => {
+                            let body = text(&p["text"]);
+                            if body.trim().is_empty() && parts.len() > 1 {
+                                continue;
+                            }
+                            f(EntryRef {
+                                key: &pkey,
+                                kind: "assistant",
+                                subtype: "text",
+                                label: "OpenCode",
+                                ts: &pts,
+                                text: &body,
+                            })
+                        }
+                        "reasoning" => {
+                            let body = text(&p["text"]);
+                            f(EntryRef {
+                                key: &pkey,
+                                kind: "tool",
+                                subtype: "thinking",
+                                label: "Размышления",
+                                ts: &pts,
+                                text: &body,
+                            })
+                        }
+                        "tool" => {
+                            let name = p["name"]
+                                .as_str()
+                                .filter(|s| !s.is_empty())
+                                .unwrap_or("tool");
+                            let body = tool_display(p);
+                            f(EntryRef {
+                                key: &pkey,
+                                kind: "tool",
+                                subtype: "tool_use",
+                                label: name,
+                                ts: &pts,
+                                text: &body,
+                            })
+                        }
+                        _ => continue,
+                    };
+                    if !keep {
+                        return false;
+                    }
+                }
+            }
+            if truthy(&d["error"]) {
+                let e = &d["error"];
+                let body = if e.is_object() {
+                    if s(&e["message"]).is_empty() {
+                        e.to_string()
+                    } else {
+                        text(&e["message"])
+                    }
+                } else {
+                    text(e)
+                };
+                let ekey = format!("e:{msg_id}");
+                return f(EntryRef {
+                    key: &ekey,
+                    kind: "error",
+                    subtype: "error",
+                    label: "Ошибка OpenCode",
+                    ts: &ts,
+                    text: &body,
+                });
+            }
+            true
+        }
+        "compaction" => {
+            let body = text(&d["summary"]);
+            f(EntryRef {
+                key: &key,
+                kind: "compact",
+                subtype: "compaction",
+                label: "Компакция",
+                ts: &ts,
+                text: &body,
+            })
+        }
+        "system" | "synthetic" => {
+            let label = d["description"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .unwrap_or(if msg_kind == "system" {
+                    "Система"
+                } else {
+                    "Служебное"
+                });
+            let body = text(&d["text"]);
+            f(EntryRef {
+                key: &key,
+                kind: "system",
+                subtype: msg_kind,
+                label,
+                ts: &ts,
+                text: &body,
+            })
+        }
+        _ => true,
+    }
+}
+fn items_from_messages(messages: &[Message], readonly: bool, include_tools: bool) -> Vec<Value> {
+    let mut out = Vec::new();
+    for m in messages {
+        push_message_items(
+            &m.id,
+            &m.kind,
+            m.seq,
+            m.created,
+            &m.data,
+            readonly,
+            include_tools,
+            false,
+            &mut out,
+        );
     }
     out
 }
-fn page(items: Vec<Value>, data: &Value, sid: &str) -> Value {
+fn page_slice(flat: &[Value], data: &Value, sid: &str) -> Value {
     let tools = data["include_tools"].as_bool().unwrap_or(false);
-    let flat = items
-        .into_iter()
-        .filter(|v| tools || matches!(s(&v["kind"]), "user" | "assistant" | "error"))
-        .collect::<Vec<_>>();
     let total = flat.len();
+    let lim = data["limit"].as_u64().unwrap_or(80).clamp(1, 150) as usize;
+    if let Some(target_key) = data["around_key"].as_str().filter(|s| !s.is_empty()) {
+        if let Some(idx) = flat.iter().position(|it| s(&it["key"]) == target_key) {
+            let after_limit = (lim / 2).max(15);
+            let half_max = if tools { 120 } else { lim };
+            let mut end = idx + 1;
+            let mut after_msgs = usize::from(matches!(s(&flat[idx]["kind"]), "user" | "assistant"));
+            while end < total && after_msgs < after_limit && end - idx < half_max {
+                if matches!(s(&flat[end]["kind"]), "user" | "assistant") {
+                    after_msgs += 1;
+                }
+                end += 1;
+            }
+            let before_limit = lim.saturating_sub(after_msgs).max(15);
+            let mut start = idx;
+            let mut before_msgs = 0;
+            while start > 0 && before_msgs < before_limit && idx - start < half_max {
+                start -= 1;
+                if matches!(s(&flat[start]["kind"]), "user" | "assistant") {
+                    before_msgs += 1;
+                }
+            }
+            let window = flat[start..end].to_vec();
+            let turns = if window.is_empty() {
+                vec![]
+            } else {
+                vec![json!({"items":window})]
+            };
+            let mut resp = json!({"provider":"opencode","cid":sid,"turns":turns,"page_msgs":before_msgs+after_msgs,"total_label":format!("записей: {total}"),"cursor":if start>0{Some(start.to_string())}else{None},"has_more":start>0,"writable":true});
+            if end < total {
+                resp["has_newer"] = json!(true);
+            }
+            return resp;
+        }
+    }
     let end = data["before"]
         .as_str()
         .and_then(|s| s.parse::<usize>().ok())
         .or_else(|| data["before"].as_u64().map(|n| n as usize))
         .unwrap_or(total)
         .min(total);
-    let lim = data["limit"].as_u64().unwrap_or(80).clamp(1, 150) as usize;
     let max = if tools { 350 } else { lim * 2 };
     let mut start = end;
     let mut msgs = 0;
@@ -1304,6 +1938,20 @@ fn update_message(c: &Connection, sid: &str, m: &Message, now: i64) -> Result<()
         params![serde_json::to_string(&m.data)?, now, m.id, sid],
     )?;
     Ok(())
+}
+fn wal_checkpoint(c: &Connection, truncate: bool) {
+    let mode = if truncate { "TRUNCATE" } else { "PASSIVE" };
+    let _ = c.execute_batch(&format!("PRAGMA wal_checkpoint({mode});"));
+}
+fn file_stat_sig(path: &Path) -> Option<(u64, u128)> {
+    let meta = fs::metadata(path).ok()?;
+    let mtime = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    Some((meta.len(), mtime))
 }
 fn quick_check(c: &Connection) -> Result<()> {
     let check: String = c.query_row("PRAGMA quick_check", [], |r| r.get(0))?;
@@ -1437,11 +2085,19 @@ fn json_sql(v: &Value) -> Result<SqlValue> {
         _ => bail!("Неподдерживаемое поле резервной копии"),
     })
 }
-fn snapshot_title(tables: &Value) -> String {
-    let v = &tables["session_v2"];
+fn snapshot_title_map(tables: &Map<String, Value>) -> String {
+    let Some(v) = tables.get("session_v2") else {
+        return String::new();
+    };
     let cols = v["columns"].as_array().or_else(|| v["cols"].as_array());
     cols.and_then(|cols| cols.iter().position(|v| v == "title"))
         .map(|i| text(&v["rows"][0][i]).trim().to_owned())
+        .unwrap_or_default()
+}
+fn snapshot_title(tables: &Value) -> String {
+    tables
+        .as_object()
+        .map(snapshot_title_map)
         .unwrap_or_default()
 }
 

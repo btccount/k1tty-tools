@@ -1,19 +1,23 @@
 use crate::{
     jsonl as j,
-    provider::{OpContext, Provider, ProviderPaths},
+    provider::{truncate_preview_item, EntryRef, OpContext, Provider, ProviderPaths},
 };
 use anyhow::{bail, Context, Result};
 use chrono::Utc;
+#[cfg(unix)]
+use fs2::FileExt;
 use regex::Regex;
 use rusqlite::{params, params_from_iter, Connection, OpenFlags, OptionalExtension};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
+    borrow::Cow,
     collections::{BTreeMap, HashMap, HashSet},
-    fs::{self, File},
-    io::{BufRead, BufReader, Read, Seek, SeekFrom, Write},
+    fs::{self, File, OpenOptions},
+    io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
-    time::Duration,
+    sync::{Mutex, OnceLock},
+    time::{Duration, UNIX_EPOCH},
 };
 const TABLES: [&str; 4] = [
     "thread_items",
@@ -21,13 +25,28 @@ const TABLES: [&str; 4] = [
     "thread_realtime_items",
     "thread_history_projection_state",
 ];
+const PAGE_BYTE_BUDGET: usize = 2 * 1024 * 1024;
 
 pub struct CodexProvider {
     paths: ProviderPaths,
+    path_cache: Mutex<HashMap<String, Vec<PathBuf>>>,
+    title_cache: Mutex<HashMap<PathBuf, (u64, u128, String, String)>>,
 }
 impl CodexProvider {
     pub fn new(paths: ProviderPaths) -> Self {
-        Self { paths }
+        Self {
+            paths,
+            path_cache: Mutex::new(HashMap::new()),
+            title_cache: Mutex::new(HashMap::new()),
+        }
+    }
+    fn invalidate_paths(&self, cid: Option<&str>) {
+        let mut cache = self.path_cache.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(cid) = cid {
+            cache.remove(cid);
+        } else {
+            cache.clear();
+        }
     }
     fn sessions(&self) -> PathBuf {
         self.paths.root.join("sessions")
@@ -65,13 +84,58 @@ impl CodexProvider {
             })
             .collect()
     }
+    fn cached_file_meta(&self, p: &Path) -> Result<(String, String, u64, f64)> {
+        let meta = p.metadata()?;
+        let len = meta.len();
+        let mtime_dur = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok());
+        let nanos = mtime_dur.map(|d| d.as_nanos()).unwrap_or(0);
+        let ts = mtime_dur.map(|d| d.as_secs_f64()).unwrap_or(0.);
+        if let Some((id, stamp)) = self
+            .title_cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(p)
+            .and_then(|(l, m, id, st)| (*l == len && *m == nanos).then(|| (id.clone(), st.clone())))
+        {
+            return Ok((id, stamp, len, ts));
+        }
+        let (id, stamp) = file_meta(p)?;
+        self.title_cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(p.to_path_buf(), (len, nanos, id.clone(), stamp.clone()));
+        Ok((id, stamp, len, ts))
+    }
     fn files(&self, cid: &str) -> Result<Vec<PathBuf>> {
         j::valid_id(cid)?;
-        Ok(self
-            .all_files()
-            .into_iter()
-            .filter(|p| file_meta(p).is_ok_and(|(id, _)| id == cid))
-            .collect())
+        if let Some(paths) = self
+            .path_cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(cid)
+            .cloned()
+        {
+            if !paths.is_empty() && paths.iter().all(|p| p.is_file()) {
+                return Ok(paths);
+            }
+        }
+        let mut groups = HashMap::<String, Vec<PathBuf>>::new();
+        for p in self.all_files() {
+            if let Ok((id, _, _, _)) = self.cached_file_meta(&p) {
+                if !id.is_empty() {
+                    groups.entry(id).or_default().push(p);
+                }
+            }
+        }
+        let found = groups.get(cid).cloned().unwrap_or_default();
+        let mut cache = self.path_cache.lock().unwrap_or_else(|e| e.into_inner());
+        for (k, v) in groups {
+            cache.insert(k, v);
+        }
+        Ok(found)
     }
     fn title(&self, cid: &str) -> String {
         self.list()
@@ -81,9 +145,8 @@ impl CodexProvider {
             .map(|v| j::s(&v, "title").into())
             .unwrap_or_else(|| cid.into())
     }
-    fn revision(&self, cid: &str) -> Result<String> {
+    fn revision_files(&self, files: &[PathBuf]) -> Result<String> {
         let mut h = Sha256::new();
-        let files = self.files(cid)?;
         let full = self.test_mode() && files.len() != 1;
         for p in files {
             if full {
@@ -92,7 +155,7 @@ impl CodexProvider {
                         .to_string_lossy()
                         .as_bytes(),
                 );
-                let mut reader = File::open(&p)?;
+                let mut reader = File::open(p)?;
                 let mut buffer = [0_u8; 65_536];
                 loop {
                     let n = reader.read(&mut buffer)?;
@@ -125,16 +188,45 @@ impl CodexProvider {
         }
         Ok(format!("{:x}", h.finalize()))
     }
-    fn check_revision(&self, cid: &str, rev: &str) -> Result<()> {
-        if rev.is_empty() || self.revision(cid)? != rev {
+    #[cfg(test)]
+    fn revision(&self, cid: &str) -> Result<String> {
+        let files = self.files(cid)?;
+        self.revision_files(&files)
+    }
+    fn check_revision_files(&self, files: &[PathBuf], rev: &str) -> Result<()> {
+        if rev.is_empty() || self.revision_files(files)? != rev {
             bail!("История изменилась после предпросмотра.")
         }
         Ok(())
     }
-    fn writable(&self, cid: &str) -> Result<bool> {
-        Ok(self.test_mode() || self.files(cid)?.len() == 1)
+    fn writable_files(&self, files: &[PathBuf]) -> bool {
+        self.test_mode() || files.len() == 1
+    }
+    fn probe_lock_files(&self, files: Option<&[PathBuf]>) -> Result<Option<String>> {
+        if let Some(files) = files {
+            for p in files {
+                if j::LockedFile::open(p, true).is_err() {
+                    return Ok(Some("Файл диалога занят Codex. Закройте этот тред в Codex или закройте приложение.".into()));
+                }
+            }
+        }
+        if self.projection().is_file() {
+            let probe = (|| -> Result<()> {
+                let c = Connection::open(self.projection())?;
+                c.busy_timeout(Duration::from_millis(100))?;
+                c.execute_batch("BEGIN IMMEDIATE;ROLLBACK")?;
+                Ok(())
+            })();
+            if probe.is_err() {
+                return Ok(Some(
+                    "База проекций Codex занята. Закройте Codex и повторите.".into(),
+                ));
+            }
+        }
+        Ok(None)
     }
     fn list(&self) -> Result<Vec<Value>> {
+        static UUID_RE: OnceLock<Regex> = OnceLock::new();
         let mut titles = HashMap::<String, String>::new();
         if self.index().is_file() {
             for l in j::read_lines(&self.index())? {
@@ -143,19 +235,31 @@ impl CodexProvider {
                 }
             }
         }
-        let mut groups = BTreeMap::<String, Vec<PathBuf>>::new();
+        let mut groups = BTreeMap::<String, Vec<(PathBuf, u64, f64)>>::new();
         for p in self.all_files() {
-            if let Ok((id, _)) = file_meta(&p) {
+            if let Ok((id, _, len, ts)) = self.cached_file_meta(&p) {
                 if !id.is_empty() {
-                    groups.entry(id).or_default().push(p);
+                    groups.entry(id).or_default().push((p, len, ts));
                 }
             }
         }
-        let uuid = Regex::new(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")?;
+        {
+            let mut cache = self.path_cache.lock().unwrap_or_else(|e| e.into_inner());
+            cache.clear();
+            for (cid, entries) in &groups {
+                cache.insert(
+                    cid.clone(),
+                    entries.iter().map(|(p, _, _)| p.clone()).collect(),
+                );
+            }
+        }
+        let uuid = UUID_RE.get_or_init(|| {
+            Regex::new(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}").unwrap()
+        });
         let mut out = Vec::new();
-        for (cid, paths) in groups {
+        for (cid, entries) in groups {
             let mut title = None;
-            for p in &paths {
+            for (p, _, _) in &entries {
                 if let Some(m) = uuid
                     .find_iter(&p.file_stem().unwrap_or_default().to_string_lossy())
                     .last()
@@ -169,13 +273,9 @@ impl CodexProvider {
             let title = title
                 .or_else(|| titles.get(&cid).cloned().filter(|s| !s.is_empty()))
                 .unwrap_or_else(|| "(без названия)".into());
-            let size: u64 = paths
-                .iter()
-                .filter_map(|p| p.metadata().ok())
-                .map(|m| m.len())
-                .sum();
-            let time = paths.iter().map(|p| j::mtime(p)).fold(0f64, f64::max);
-            let count = paths.len();
+            let size: u64 = entries.iter().map(|(_, len, _)| *len).sum();
+            let time = entries.iter().map(|(_, _, ts)| *ts).fold(0f64, f64::max);
+            let count = entries.len();
             out.push(json!({"provider":"codex","id":cid,"title":title,"subtitle":format!("rollout-файлов: {count}{}",if count==1{""}else{" (только чтение)"}),"badge":format!("{count} ф."),"size":size,"mtime":j::display_time(time),"mtime_ts":time,"writable":self.test_mode()||count==1}));
         }
         out.sort_by(|a, b| {
@@ -189,22 +289,30 @@ impl CodexProvider {
     fn entries(&self, data: &Value) -> Result<Value> {
         let cid = j::required(data, "cid")?;
         let files = self.files(cid)?;
-        let writable = self.writable(cid)?;
-        let (items, cursor, msgs) = read_page(&files, data, writable)?;
-        let lock = self.probe_lock(Some(cid))?;
-        Ok(
-            json!({"provider":"codex","cid":cid,"turns":j::turns(items),"page_msgs":msgs,"total_label":format!("загружено: {msgs}"),"cursor":cursor,"has_more":cursor.is_some(),"writable":writable,"file_locked":lock.is_some(),"lock_reason":lock.unwrap_or_default(),"blocked_info":self.detect_block(cid)?,"block_presets":block_presets()}),
-        )
+        let writable = self.writable_files(&files);
+        let (items, cursor, msgs, has_newer) =
+            if let Some(around) = data["around_key"].as_str().filter(|s| !s.is_empty()) {
+                read_page_around(&files, data, writable, around)?
+            } else {
+                let (items, cursor, msgs) = read_page(&files, data, writable)?;
+                (items, cursor, msgs, false)
+            };
+        let lock = self.probe_lock_files(Some(&files))?;
+        let mut resp = json!({"provider":"codex","cid":cid,"turns":j::turns(items),"page_msgs":msgs,"total_label":format!("загружено: {msgs}"),"cursor":cursor,"has_more":cursor.is_some(),"writable":writable,"file_locked":lock.is_some(),"lock_reason":lock.unwrap_or_default(),"blocked_info":self.detect_block_files(cid,&files)?,"block_presets":block_presets()});
+        if has_newer {
+            resp["has_newer"] = json!(true);
+        }
+        Ok(resp)
     }
     fn edit_preview(&self, data: &Value) -> Result<Value> {
         let cid = j::required(data, "cid")?;
         let files = self.files(cid)?;
-        let rev = self.revision(cid)?;
+        let rev = self.revision_files(&files)?;
         let (fi, off) = byte_key(&files, j::required(data, "key")?)?;
         let row = j::read_at(&files[fi], off)?.obj()?;
         let info = edit_info(&row)?;
-        self.check_revision(cid, &rev)?;
-        let writable = self.writable(cid)?;
+        self.check_revision_files(&files, &rev)?;
+        let writable = self.writable_files(&files);
         Ok(
             json!({"text":info["old"],"kind":info["label"],"hint":if writable{"Текст обновится в rollout-файле с удержанием блокировок, проекция треда будет сброшена. Перед записью создаётся проверенная резервная копия."}else{"Правка недоступна: нужен однофайловый rollout и поддерживаемая платформа."},"revision":if writable{Some(rev)}else{None},"writable":writable}),
         )
@@ -213,11 +321,11 @@ impl CodexProvider {
         let cid = j::required(data, "cid")?;
         let files = self.files(cid)?;
         let mode = j::s(data, "mode");
-        let rev = self.revision(cid)?;
+        let rev = self.revision_files(&files)?;
         let ranges = cut_ranges(&files, j::required(data, "key")?, mode)?;
         let raw = cut_report(cid, mode, &files, &ranges)?;
-        self.check_revision(cid, &rev)?;
-        let writable = self.writable(cid)?;
+        self.check_revision_files(&files, &rev)?;
+        let writable = self.writable_files(&files);
         let preview = raw["will_delete"]["steps_preview"]
             .as_array()
             .cloned()
@@ -237,6 +345,7 @@ impl CodexProvider {
             return Ok(());
         }
         let src = Connection::open_with_flags(self.projection(), OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        src.busy_timeout(Duration::from_millis(1000))?;
         let dst = Connection::open(dest)?;
         src.execute_batch("BEGIN")?;
         dst.execute_batch("BEGIN")?;
@@ -270,8 +379,7 @@ impl CodexProvider {
         }
         Ok(())
     }
-    fn backup(&self, cid: &str, tag: &str) -> Result<PathBuf> {
-        let files = self.files(cid)?;
+    fn backup_files_for(&self, cid: &str, tag: &str, files: &[PathBuf]) -> Result<PathBuf> {
         if files.is_empty() {
             bail!("Тред {cid} не найден")
         };
@@ -282,9 +390,9 @@ impl CodexProvider {
             .join(format!("{}-{tag}", j::stamp()));
         fs::create_dir_all(&bdir)?;
         let mut hashes = serde_json::Map::new();
-        for p in &files {
+        for p in files {
             let rel = p.strip_prefix(self.sessions())?;
-            let h = j::copy_checked(p, &bdir.join("sessions").join(rel))?;
+            let (h, _, _) = j::copy_checked_with_stats(p, &bdir.join("sessions").join(rel))?;
             hashes.insert(rel.to_string_lossy().into_owned(), json!(h));
         }
         let snapshot = bdir.join("projection.sqlite");
@@ -332,6 +440,83 @@ impl CodexProvider {
         c.busy_timeout(Duration::from_secs(3))?;
         Ok(Some(c))
     }
+    fn sync_state_db_delete(&self, cid: &str) {
+        let db = self.paths.root.join("state_5.sqlite");
+        if !db.is_file() {
+            return;
+        }
+        if let Ok(c) = Connection::open(&db) {
+            let _ = c.busy_timeout(Duration::from_millis(3000));
+            let _ = c.execute("DELETE FROM threads WHERE id = ?", [cid]);
+            let _ = c.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+        }
+    }
+    fn sync_state_db_touch(&self, cid: &str) {
+        let db = self.paths.root.join("state_5.sqlite");
+        if !db.is_file() {
+            return;
+        }
+        if let Ok(c) = Connection::open(&db) {
+            let _ = c.busy_timeout(Duration::from_millis(1000));
+            let now_ts = Utc::now().timestamp();
+            let _ = c.execute(
+                "UPDATE threads SET updated_at = ? WHERE id = ?",
+                params![now_ts, cid],
+            );
+            let _ = c.execute_batch("PRAGMA wal_checkpoint(PASSIVE);");
+        }
+    }
+    fn sync_global_state_delete(&self, cid: &str) {
+        let path = self.paths.root.join(".codex-global-state.json");
+        if !path.is_file() {
+            return;
+        }
+        if let Ok(mut v) = j::load_json(&path) {
+            if strip_tid_refs(&mut v, cid) {
+                if let Ok(bytes) = serde_json::to_vec(&v) {
+                    let _ = crate::storage::atomic_write(&path, &bytes);
+                }
+            }
+        }
+    }
+    fn remove_writer_lock_if_unlocked(&self, cid: &str) {
+        let lock_path = self
+            .paths
+            .root
+            .join("thread-writer-locks")
+            .join(format!("{cid}.lock"));
+        if !lock_path.is_file() {
+            return;
+        }
+        #[cfg(unix)]
+        {
+            if let Ok(f) = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&lock_path)
+                .or_else(|_| File::open(&lock_path))
+            {
+                if f.try_lock_exclusive().is_ok() {
+                    let _ = FileExt::unlock(&f);
+                    drop(f);
+                    let _ = fs::remove_file(&lock_path);
+                }
+            }
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            if let Ok(f) = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .share_mode(0)
+                .open(&lock_path)
+            {
+                drop(f);
+                let _ = fs::remove_file(&lock_path);
+            }
+        }
+    }
     fn mutate(&self, op: &str, data: &Value, ctx: &OpContext) -> Result<Value> {
         let cid = j::required(data, "cid")?;
         self.assert_writable(Some(cid))?;
@@ -346,7 +531,7 @@ impl CodexProvider {
             .iter()
             .map(|p| j::LockedFile::open(p, true))
             .collect::<Result<_>>()?;
-        self.check_revision(cid, j::s(data, "revision"))?;
+        self.check_revision_files(&files, j::s(data, "revision"))?;
         let mode = if op == "apply_edit" {
             "edit"
         } else {
@@ -409,7 +594,7 @@ impl CodexProvider {
         }
         let backup = if ctx.auto_backup {
             ctx.phase("backup");
-            Some(self.backup(cid, "stream")?)
+            Some(self.backup_files_for(cid, "stream", &files)?)
         } else {
             None
         };
@@ -423,11 +608,21 @@ impl CodexProvider {
         }
         let mut changed = Vec::new();
         let mut undo = Vec::new();
-        for p in &files {
-            let mut t = tempfile::NamedTempFile::new_in(p.parent().unwrap())?;
-            std::io::copy(&mut File::open(p)?, t.as_file_mut())?;
-            t.as_file().sync_all()?;
-            undo.push(t);
+        if backup.is_none() {
+            for p in &files {
+                let mut t = tempfile::NamedTempFile::new_in(p.parent().unwrap())?;
+                let mut src = File::open(p)?;
+                let mut buf = vec![0u8; 256 * 1024];
+                loop {
+                    let n = src.read(&mut buf)?;
+                    if n == 0 {
+                        break;
+                    }
+                    t.write_all(&buf[..n])?;
+                }
+                t.as_file().sync_all()?;
+                undo.push(t);
+            }
         }
         ctx.phase(if mode == "edit" { "edit" } else { "cut" });
         let result = (|| -> Result<Value> {
@@ -445,6 +640,7 @@ impl CodexProvider {
                     counts.insert(table.into(), json!(count));
                 }
                 c.execute_batch("COMMIT")?;
+                wal_checkpoint_truncate(c);
             }
             Ok(Value::Object(counts))
         })();
@@ -457,18 +653,34 @@ impl CodexProvider {
                     let _ = c.execute_batch("ROLLBACK");
                 }
                 for i in changed {
-                    guards[i]
-                        .replace_from(undo[i].path())
-                        .context("Не удалось вернуть исходный rollout после ошибки записи")?;
+                    if let Some(bdir) = &backup {
+                        let rel = files[i].strip_prefix(self.sessions())?;
+                        let saved = bdir.join("sessions").join(rel);
+                        if saved.is_file() {
+                            guards[i].replace_from(&saved).context(
+                                "Не удалось вернуть исходный rollout после ошибки записи",
+                            )?;
+                        }
+                    } else if let Some(u) = undo.get(i) {
+                        guards[i]
+                            .replace_from(u.path())
+                            .context("Не удалось вернуть исходный rollout после ошибки записи")?;
+                    }
                 }
                 return Err(error);
             }
         }
         drop(guards);
+        self.sync_state_db_touch(cid);
+        let mut removed_any_file = false;
         for (i, candidate) in candidates.iter().enumerate() {
             if candidate.is_none() {
                 fs::remove_file(&files[i])?;
+                removed_any_file = true;
             }
+        }
+        if removed_any_file {
+            self.invalidate_paths(Some(cid));
         }
         if let Some(p) = marker {
             j::save_json(&p, &json!({"status":"complete","operation":mode}))?;
@@ -496,7 +708,7 @@ impl CodexProvider {
             .collect::<Result<_>>()?;
         let backup = if ctx.auto_backup {
             ctx.phase("backup");
-            Some(self.backup(cid, "delete")?)
+            Some(self.backup_files_for(cid, "delete", &files)?)
         } else {
             None
         };
@@ -507,11 +719,13 @@ impl CodexProvider {
                 c.execute(&format!("DELETE FROM \"{table}\" WHERE thread_id=?"), [cid])?;
             }
             c.execute_batch("COMMIT")?;
+            wal_checkpoint_truncate(&c);
         }
         drop(guards);
         for p in &files {
             fs::remove_file(p)?;
         }
+        self.invalidate_paths(Some(cid));
         if self.index().is_file() {
             let stems: Vec<_> = files
                 .iter()
@@ -528,6 +742,9 @@ impl CodexProvider {
                 .collect();
             j::atomic_write(&self.index(), &j::write_lines(&kept))?;
         }
+        self.sync_state_db_delete(cid);
+        self.sync_global_state_delete(cid);
+        self.remove_writer_lock_if_unlocked(cid);
         ctx.phase("done");
         Ok(
             json!({"deleted":cid,"provider":"codex","backup":backup,"files_removed":files.len(),"warns":if self.running().is_empty(){Vec::<String>::new()}else{vec!["Обнаружен запущенный Codex. Перезапустите приложение для обновления списка.".into()]} }),
@@ -723,7 +940,7 @@ impl CodexProvider {
         let live = self.files(cid)?;
         let undo = if !live.is_empty() {
             ctx.phase("backup");
-            Some(self.backup(cid, "before-restore")?)
+            Some(self.backup_files_for(cid, "before-restore", &live)?)
         } else {
             None
         };
@@ -755,6 +972,7 @@ impl CodexProvider {
                     }
                 }
                 c.execute_batch("COMMIT")?;
+                wal_checkpoint_truncate(c);
             }
             Ok(())
         })();
@@ -780,6 +998,7 @@ impl CodexProvider {
         }
         drop(guards);
         drop(temporary);
+        self.invalidate_paths(None);
         if let Some(saved) = meta["session_index_lines"].as_array() {
             let mut raw = fs::read_to_string(self.index()).unwrap_or_default();
             let mut lines: HashSet<String> = raw.lines().map(str::to_string).collect();
@@ -797,11 +1016,17 @@ impl CodexProvider {
         ctx.phase("done");
         Ok(json!({"restored":bdir,"provider":"codex","backup":undo,"warns":[]}))
     }
+    #[cfg(test)]
     fn detect_block(&self, cid: &str) -> Result<Option<Value>> {
+        let files = self.files(cid)?;
+        self.detect_block_files(cid, &files)
+    }
+    fn detect_block_files(&self, cid: &str, files: &[PathBuf]) -> Result<Option<Value>> {
         if self.projection().is_file() {
             if let Ok(c) =
                 Connection::open_with_flags(self.projection(), OpenFlags::SQLITE_OPEN_READ_ONLY)
             {
+                let _ = c.busy_timeout(Duration::from_millis(1000));
                 let row=c.query_row("SELECT turn_id,status,error_json FROM thread_turns WHERE thread_id=? ORDER BY rollout_ordinal DESC LIMIT 1",[cid],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,Option<String>>(2)?))).optional();
                 if let Ok(Some((turn, status, err))) = row {
                     if status == "failed" || err.as_ref().is_some_and(|s| !s.is_empty()) {
@@ -827,7 +1052,6 @@ impl CodexProvider {
                 }
             }
         }
-        let files = self.files(cid)?;
         let mut answer = None;
         if let Some(p) = files.last() {
             let mut n = 0;
@@ -866,15 +1090,21 @@ impl CodexProvider {
         }
         Ok(answer)
     }
-    fn lock_backup(&self, cid: &str, tag: &str, path: &Path, offset: u64) -> Result<PathBuf> {
-        let files = self.files(cid)?;
+    fn lock_backup_files(
+        &self,
+        cid: &str,
+        tag: &str,
+        files: &[PathBuf],
+        path: &Path,
+        offset: u64,
+    ) -> Result<PathBuf> {
         let total: u64 = files
             .iter()
             .filter_map(|p| p.metadata().ok())
             .map(|m| m.len())
             .sum();
         if total <= 256 * 1024 * 1024 {
-            return self.backup(cid, tag);
+            return self.backup_files_for(cid, tag, files);
         }
         let bdir = self
             .paths
@@ -969,7 +1199,7 @@ impl CodexProvider {
         let tag = if unlock { "k1tty_unlock" } else { "k1tty_lock" };
         let backup = if ctx.auto_backup {
             ctx.phase("backup");
-            Some(self.lock_backup(cid, tag, path, min_off)?)
+            Some(self.lock_backup_files(cid, tag, &files, path, min_off)?)
         } else {
             None
         };
@@ -1041,6 +1271,7 @@ impl CodexProvider {
                     c.execute("UPDATE thread_history_projection_state SET next_rollout_byte_offset=? WHERE thread_id=?",params![new_size,cid])?;
                 }
                 c.execute_batch("COMMIT")?;
+                wal_checkpoint_truncate(c);
             }
             Ok(changed)
         })();
@@ -1093,6 +1324,10 @@ impl CodexProvider {
                 if n == 0 {
                     break;
                 }
+                if codex_raw_skip_visit(&raw) {
+                    offset += n as u64;
+                    continue;
+                }
                 if let Ok(v) = serde_json::from_slice::<Value>(&raw) {
                     if let Some(it) = history_item(&v, fi, &format!("b{offset}")) {
                         let k = j::s(&it, "kind");
@@ -1132,17 +1367,25 @@ impl CodexProvider {
         let mut thinking_bytes = 0usize;
         let mut heavy_tool_count = 0usize;
         let mut heavy_tool_bytes = 0usize;
+        let mut raw = Vec::new();
         for p in &files {
-            let lines = j::read_lines(p)?;
-            for line in &lines {
-                let Ok(obj) = line.obj() else { continue };
+            let mut reader = BufReader::with_capacity(256 * 1024, File::open(p)?);
+            loop {
+                raw.clear();
+                let n = reader.read_until(b'\n', &mut raw)?;
+                if n == 0 {
+                    break;
+                }
+                let Ok(obj) = serde_json::from_slice::<Value>(&raw) else {
+                    continue;
+                };
                 if j::s(&obj, "type") != "response_item" {
                     continue;
                 }
                 let pt = j::s(&obj["payload"], "type");
                 if pt == "reasoning" {
                     thinking_count += 1;
-                    thinking_bytes += line.raw.len();
+                    thinking_bytes += raw.len();
                 } else if matches!(pt, "function_call_output" | "custom_tool_call_output") {
                     let sz = obj["payload"]["output"].as_str().map(str::len).unwrap_or(0);
                     if sz > threshold {
@@ -1284,7 +1527,7 @@ impl CodexProvider {
         }
         let backup = if ctx.auto_backup {
             ctx.phase("backup");
-            Some(self.backup(cid, "slim")?)
+            Some(self.backup_files_for(cid, "slim", &files)?)
         } else {
             None
         };
@@ -1302,6 +1545,7 @@ impl CodexProvider {
                     c.execute(&format!("DELETE FROM \"{table}\" WHERE thread_id=?"), [cid])?;
                 }
                 c.execute_batch("COMMIT")?;
+                wal_checkpoint_truncate(c);
             }
             Ok(())
         })();
@@ -1314,6 +1558,8 @@ impl CodexProvider {
             }
             return Err(error);
         }
+        drop(guards);
+        self.sync_state_db_touch(cid);
         let freed_bytes = original_total.saturating_sub(new_total);
         ctx.phase("done");
         Ok(json!({
@@ -1337,28 +1583,113 @@ impl Provider for CodexProvider {
     fn paths(&self) -> &ProviderPaths {
         &self.paths
     }
-    fn probe_lock(&self, cid: Option<&str>) -> Result<Option<String>> {
-        if let Some(cid) = cid {
-            for p in self.files(cid)? {
-                if j::LockedFile::open(&p, true).is_err() {
-                    return Ok(Some("Файл диалога занят Codex. Закройте этот тред в Codex или закройте приложение.".into()));
+    fn visit_entries(&self, cid: &str, f: &mut dyn FnMut(EntryRef<'_>) -> bool) -> Result<()> {
+        let files = self.files(cid)?;
+        let mut raw = Vec::new();
+        for (fi, p) in files.iter().enumerate() {
+            let mut reader = BufReader::with_capacity(256 * 1024, File::open(p)?);
+            let mut offset = 0u64;
+            loop {
+                raw.clear();
+                let n = reader.read_until(b'\n', &mut raw)?;
+                if n == 0 {
+                    break;
                 }
+                if codex_raw_skip_visit(&raw) {
+                    offset += n as u64;
+                    continue;
+                }
+                if let Ok(v) = serde_json::from_slice::<Value>(&raw) {
+                    if let Some(it) = history_item(&v, fi, &format!("b{offset}")) {
+                        let k = j::s(&it, "kind");
+                        let raw_label = j::s(&it, "label");
+                        let subtype = if raw_label == "reasoning" {
+                            "thinking"
+                        } else {
+                            it.get("subtype").and_then(Value::as_str).unwrap_or(k)
+                        };
+                        let default_label;
+                        let label =
+                            if matches!(k, "tool" | "error" | "system") && !raw_label.is_empty() {
+                                raw_label
+                            } else {
+                                default_label = j::label(k, "Codex");
+                                &default_label
+                            };
+                        let entry = EntryRef {
+                            key: j::s(&it, "key"),
+                            kind: k,
+                            subtype,
+                            label,
+                            ts: j::s(&it, "ts"),
+                            text: j::s(&it, "text"),
+                        };
+                        if !f(entry) {
+                            return Ok(());
+                        }
+                    }
+                }
+                offset += n as u64;
             }
         }
-        if self.projection().is_file() {
-            let probe = (|| -> Result<()> {
-                let c = Connection::open(self.projection())?;
-                c.busy_timeout(Duration::from_millis(100))?;
-                c.execute_batch("BEGIN IMMEDIATE;ROLLBACK")?;
-                Ok(())
-            })();
-            if probe.is_err() {
-                return Ok(Some(
-                    "База проекций Codex занята. Закройте Codex и повторите.".into(),
-                ));
+        Ok(())
+    }
+    fn read_entry_text(&self, cid: &str, key: &str) -> Result<Option<String>> {
+        let files = self.files(cid)?;
+        let Some((fi, pos)) = key.split_once(':') else {
+            return Ok(None);
+        };
+        let Ok(fi) = fi.parse::<usize>() else {
+            return Ok(None);
+        };
+        let Some(path) = files.get(fi) else {
+            return Ok(None);
+        };
+        let offset = if let Some(byte) = pos.strip_prefix('b') {
+            byte.parse::<u64>()?
+        } else {
+            let count = pos.parse::<usize>()?;
+            let mut f = BufReader::new(File::open(path)?);
+            let mut off = 0u64;
+            let mut raw = Vec::new();
+            for _ in 0..count {
+                raw.clear();
+                let n = f.read_until(b'\n', &mut raw)?;
+                if n == 0 {
+                    return Ok(None);
+                }
+                off += n as u64;
+            }
+            off
+        };
+        let row = j::read_at(path, offset)?.obj()?;
+        if let Some(mut it) = history_item(&row, fi, &format!("b{offset}")) {
+            if let Some(Value::String(text)) = it.as_object_mut().and_then(|m| m.remove("text")) {
+                return Ok(Some(text));
             }
         }
         Ok(None)
+    }
+    fn probe_lock(&self, cid: Option<&str>) -> Result<Option<String>> {
+        if let Some(cid) = cid {
+            let files = self.files(cid)?;
+            return self.probe_lock_files(Some(&files));
+        }
+        self.probe_lock_files(None)
+    }
+    fn content_signature(&self, cid: &str) -> Option<String> {
+        let files = self.files(cid).ok()?;
+        if files.is_empty() {
+            return None;
+        }
+        if files.len() == 1 {
+            return j::content_signature(&files[0]);
+        }
+        let sigs: Vec<String> = files
+            .iter()
+            .filter_map(|p| j::content_signature(p))
+            .collect();
+        (!sigs.is_empty()).then(|| sigs.join("|"))
     }
     fn call(&self, op: &str, data: &Value, ctx: &OpContext) -> Result<Value> {
         match op {
@@ -1378,7 +1709,12 @@ impl Provider for CodexProvider {
                     json!({"id":"codex","name":"Codex","short":"CX","available":avail,"writable":avail,"blocked":false,"running":running,"test":self.test_mode(),"appdata":self.paths.root,"backups_root":self.paths.backup_root,"note":note}),
                 )
             }
-            "convs" => Ok(json!(self.list()?)),
+            "convs" => {
+                if data["refresh"].as_bool().unwrap_or(false) {
+                    self.invalidate_paths(None);
+                }
+                Ok(json!(self.list()?))
+            }
             "entries" => self.entries(data),
             "edit_preview" => self.edit_preview(data),
             "preview_cut" => self.preview_cut(data),
@@ -1427,6 +1763,16 @@ fn join_text(content: &Value) -> String {
         .collect::<Vec<_>>()
         .join("\n\n")
 }
+fn output_text(v: &Value) -> String {
+    if v.is_array() {
+        let joined = join_text(v);
+        if !joined.is_empty() {
+            return joined;
+        }
+    }
+    j::text(v)
+}
+
 fn auto_injected(text: &str) -> bool {
     let t = text.trim_start();
     ["<environment_context", "<app-context", "<user_instructions"]
@@ -1437,7 +1783,7 @@ pub fn history_item(v: &Value, fi: usize, position: &str) -> Option<Value> {
     let typ = j::s(v, "type");
     let pl = &v["payload"];
     let pt = j::s(pl, "type");
-    let mut out = json!({"key":format!("{fi}:{position}"),"ts":v.get("timestamp").cloned().unwrap_or(json!("")),"fi":fi,"line":position});
+    let out = json!({"key":format!("{fi}:{position}"),"ts":v.get("timestamp").cloned().unwrap_or(json!("")),"fi":fi,"line":position});
     let extra = if typ == "event_msg" {
         match pt {
             "task_complete" if !pl["error"].is_null() && pl["error"] != false => {
@@ -1483,23 +1829,36 @@ pub fn history_item(v: &Value, fi: usize, position: &str) -> Option<Value> {
                 json!({"kind":"tool","label":if j::s(pl,"name").is_empty(){pt}else{j::s(pl,"name")},"text":j::text(pl.get("input").unwrap_or(&pl["arguments"]))})
             }
             "custom_tool_call_output" | "function_call_output" => {
-                json!({"kind":"tool","label":"вывод","text":j::text(&pl["output"]),"status":pl["status"]})
+                json!({"kind":"tool","label":"вывод","text":output_text(&pl["output"]),"status":pl["status"]})
             }
             _ => return None,
         }
     } else {
         return None;
     };
-    out.as_object_mut()?.extend(extra.as_object()?.clone());
-    Some(out)
+    if let (Value::Object(mut out_map), Value::Object(extra_map)) = (out, extra) {
+        out_map.extend(extra_map);
+        Some(Value::Object(out_map))
+    } else {
+        None
+    }
 }
 fn entry(it: Value, writable: bool) -> Value {
-    let k = j::s(&it, "kind");
+    let mut map = match it {
+        Value::Object(m) => m,
+        _ => return Value::Null,
+    };
+    let k = map
+        .get("kind")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_owned();
+    let raw_subtype = map.remove("subtype");
+    let raw_label = map.remove("label");
+    let is_aborted = raw_subtype.as_ref().and_then(Value::as_str) == Some("aborted");
     let mut actions = Vec::new();
     if writable {
-        if matches!(k, "user" | "assistant" | "system" | "tool")
-            && j::s(&it, "subtype") != "aborted"
-        {
+        if matches!(k.as_str(), "user" | "assistant" | "system" | "tool") && !is_aborted {
             actions.push("edit");
         }
         if k == "user" {
@@ -1507,12 +1866,63 @@ fn entry(it: Value, writable: bool) -> Value {
         }
         actions.push("cut_tail");
     }
-    let label = if matches!(k, "tool" | "error" | "system") && !j::s(&it, "label").is_empty() {
-        j::s(&it, "label").to_string()
+    let raw_label_str = raw_label.as_ref().and_then(Value::as_str).unwrap_or("");
+    let label = if matches!(k.as_str(), "tool" | "error" | "system") && !raw_label_str.is_empty() {
+        raw_label_str.to_owned()
     } else {
-        j::label(k, "Codex")
+        j::label(&k, "Codex")
     };
-    json!({"key":it["key"],"kind":k,"subtype":if j::s(&it,"label")=="reasoning"{"thinking"}else{it.get("subtype").and_then(Value::as_str).unwrap_or(k)},"label":label,"text":it.get("text").cloned().unwrap_or(json!("")),"ts":it["ts"],"tool":it["label"],"code":it["code"],"status":it["status"],"in_db":true,"actions":actions})
+    let subtype = if raw_label_str == "reasoning" {
+        Value::String("thinking".into())
+    } else if let Some(s) = raw_subtype.as_ref().and_then(Value::as_str) {
+        Value::String(s.to_owned())
+    } else {
+        Value::String(k.clone())
+    };
+    let mut out = serde_json::Map::with_capacity(11);
+    out.insert("key".into(), map.remove("key").unwrap_or(Value::Null));
+    out.insert("kind".into(), Value::String(k));
+    out.insert("subtype".into(), subtype);
+    out.insert("label".into(), Value::String(label));
+    out.insert(
+        "text".into(),
+        map.remove("text").unwrap_or_else(|| json!("")),
+    );
+    out.insert("ts".into(), map.remove("ts").unwrap_or(Value::Null));
+    out.insert("tool".into(), raw_label.unwrap_or(Value::Null));
+    out.insert("code".into(), map.remove("code").unwrap_or(Value::Null));
+    out.insert("status".into(), map.remove("status").unwrap_or(Value::Null));
+    out.insert("in_db".into(), Value::Bool(true));
+    out.insert("actions".into(), json!(actions));
+    Value::Object(out)
+}
+#[derive(serde::Deserialize)]
+struct CodexPayloadProbe<'a> {
+    #[serde(rename = "type", borrow)]
+    typ: Option<Cow<'a, str>>,
+    #[serde(borrow)]
+    role: Option<Cow<'a, str>>,
+}
+#[derive(serde::Deserialize)]
+struct CodexKindProbe<'a> {
+    #[serde(rename = "type", borrow)]
+    typ: Option<Cow<'a, str>>,
+    payload: Option<CodexPayloadProbe<'a>>,
+}
+fn codex_raw_may_be_dialogue(raw: &[u8]) -> bool {
+    let Ok(probe) = serde_json::from_slice::<CodexKindProbe>(raw) else {
+        return false;
+    };
+    let Some(pl) = probe.payload else {
+        return false;
+    };
+    match (probe.typ.as_deref(), pl.typ.as_deref()) {
+        (Some("response_item"), Some("message")) => {
+            matches!(pl.role.as_deref(), Some("user" | "assistant"))
+        }
+        (Some("event_msg"), Some("task_complete")) => true,
+        _ => false,
+    }
 }
 fn read_page(
     files: &[PathBuf],
@@ -1540,13 +1950,18 @@ fn read_page(
             bail!("Курсор больше не существует")
         }
     }
+    let max_items = if include { 350 } else { limit * 2 };
     let (mut items, mut msgs, mut cursor) = (Vec::new(), 0, None);
+    let mut page_bytes = 0usize;
     for fi in (0..=last).rev() {
         let mut stop = false;
         j::reverse_lines(
             File::open(&files[fi])?,
             if fi == last { end } else { None },
             |off, raw| {
+                if !include && !codex_raw_may_be_dialogue(raw) {
+                    return Ok(true);
+                }
                 let Ok(v) = serde_json::from_slice::<Value>(raw) else {
                     return Ok(true);
                 };
@@ -1560,11 +1975,18 @@ fn read_page(
                 if matches!(kind, "user" | "assistant") {
                     msgs += 1;
                 }
-                if msgs >= limit || items.len() + 1 >= 2000 {
-                    cursor = (fi > 0 || off > 0).then(|| j::s(&it, "key").to_string());
+                let mut built = entry(it, writable);
+                truncate_preview_item(&mut built);
+                page_bytes += built["text"].as_str().map(str::len).unwrap_or(0);
+                let item_key = built["key"].as_str().unwrap_or("").to_owned();
+                items.push(built);
+                if msgs >= limit
+                    || items.len() >= max_items
+                    || (!items.is_empty() && page_bytes >= PAGE_BYTE_BUDGET)
+                {
+                    cursor = (fi > 0 || off > 0).then_some(item_key);
                     stop = true;
                 }
-                items.push(entry(it, writable));
                 Ok(!stop)
             },
         )?;
@@ -1574,6 +1996,137 @@ fn read_page(
     }
     items.reverse();
     Ok((items, cursor, msgs))
+}
+fn read_page_around(
+    files: &[PathBuf],
+    data: &Value,
+    writable: bool,
+    around_key: &str,
+) -> Result<(Vec<Value>, Option<String>, usize, bool)> {
+    if files.is_empty() {
+        return Ok((Vec::new(), None, 0, false));
+    }
+    let limit = data["limit"].as_u64().unwrap_or(80).clamp(1, 150) as usize;
+    let include = data["include_tools"] == true;
+    let (target_fi, target_off) = byte_key(files, around_key)?;
+
+    let after_limit = (limit / 2).max(15);
+    let after_max_items = if include { 120 } else { limit };
+    let half_budget = PAGE_BYTE_BUDGET / 2;
+    let mut after_items = Vec::new();
+    let mut after_msgs = 0usize;
+    let mut after_bytes = 0usize;
+    let mut has_newer = false;
+    let mut raw = Vec::new();
+
+    for fi in target_fi..files.len() {
+        let mut f = File::open(&files[fi])?;
+        let mut offset = if fi == target_fi {
+            f.seek(SeekFrom::Start(target_off))?;
+            target_off
+        } else {
+            0
+        };
+        let mut reader = BufReader::with_capacity(64 * 1024, f);
+        loop {
+            raw.clear();
+            let n = reader.read_until(b'\n', &mut raw)?;
+            if n == 0 {
+                break;
+            }
+            let cur_off = offset;
+            offset += n as u64;
+            let is_target = fi == target_fi && cur_off == target_off;
+            if !is_target && !include && !codex_raw_may_be_dialogue(&raw) {
+                continue;
+            }
+            let Ok(v) = serde_json::from_slice::<Value>(&raw) else {
+                continue;
+            };
+            let Some(it) = history_item(&v, fi, &format!("b{cur_off}")) else {
+                continue;
+            };
+            let kind = j::s(&it, "kind");
+            if !is_target && !include && !matches!(kind, "user" | "assistant" | "error") {
+                continue;
+            }
+            if !after_items.is_empty()
+                && (after_msgs >= after_limit
+                    || after_items.len() >= after_max_items
+                    || after_bytes >= half_budget)
+            {
+                has_newer = true;
+                break;
+            }
+            if matches!(kind, "user" | "assistant") {
+                after_msgs += 1;
+            }
+            let mut built = entry(it, writable);
+            truncate_preview_item(&mut built);
+            after_bytes += built["text"].as_str().map(str::len).unwrap_or(0);
+            after_items.push(built);
+        }
+        if has_newer {
+            break;
+        }
+    }
+
+    let before_limit = limit.saturating_sub(after_msgs).max(15);
+    let before_max_items = if include { 120 } else { limit };
+    let mut before_items = Vec::new();
+    let mut before_msgs = 0usize;
+    let mut before_bytes = 0usize;
+    let mut cursor = None;
+
+    for fi in (0..=target_fi).rev() {
+        let mut stop = false;
+        j::reverse_lines(
+            File::open(&files[fi])?,
+            if fi == target_fi {
+                Some(target_off)
+            } else {
+                None
+            },
+            |off, line_raw| {
+                if !include && !codex_raw_may_be_dialogue(line_raw) {
+                    return Ok(true);
+                }
+                let Ok(v) = serde_json::from_slice::<Value>(line_raw) else {
+                    return Ok(true);
+                };
+                let Some(it) = history_item(&v, fi, &format!("b{off}")) else {
+                    return Ok(true);
+                };
+                let kind = j::s(&it, "kind");
+                if !include && !matches!(kind, "user" | "assistant" | "error") {
+                    return Ok(true);
+                }
+                if matches!(kind, "user" | "assistant") {
+                    before_msgs += 1;
+                }
+                let mut built = entry(it, writable);
+                truncate_preview_item(&mut built);
+                before_bytes += built["text"].as_str().map(str::len).unwrap_or(0);
+                let item_key = built["key"].as_str().unwrap_or("").to_owned();
+                before_items.push(built);
+                if before_msgs >= before_limit
+                    || before_items.len() >= before_max_items
+                    || (!before_items.is_empty() && before_bytes >= half_budget)
+                {
+                    cursor = (fi > 0 || off > 0).then_some(item_key);
+                    stop = true;
+                }
+                Ok(!stop)
+            },
+        )?;
+        if stop {
+            break;
+        }
+    }
+
+    before_items.reverse();
+    before_items.extend(after_items);
+    Ok((before_items, cursor, before_msgs + after_msgs, has_newer))
 }
 fn byte_key(files: &[PathBuf], key: &str) -> Result<(usize, u64)> {
     let (fi, pos) = key.split_once(':').context("Недопустимый ключ сообщения")?;
@@ -1755,8 +2308,81 @@ fn validate_ordinals(path: &Path) -> Result<()> {
     }
     Ok(())
 }
+fn wal_checkpoint_truncate(c: &Connection) {
+    let _ = c.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+}
+fn strip_tid_refs(v: &mut Value, tid: &str) -> bool {
+    match v {
+        Value::Array(arr) => {
+            let before = arr.len();
+            arr.retain(|item| {
+                if item.as_str() == Some(tid) {
+                    return false;
+                }
+                if let Some(obj) = item.as_object() {
+                    if obj.get("id").and_then(Value::as_str) == Some(tid)
+                        || obj.get("threadId").and_then(Value::as_str) == Some(tid)
+                        || obj.get("thread_id").and_then(Value::as_str) == Some(tid)
+                    {
+                        return false;
+                    }
+                }
+                true
+            });
+            let mut changed = arr.len() != before;
+            for item in arr.iter_mut() {
+                if strip_tid_refs(item, tid) {
+                    changed = true;
+                }
+            }
+            changed
+        }
+        Value::Object(map) => {
+            let before = map.len();
+            map.retain(|k, val| k != tid && val.as_str() != Some(tid));
+            let mut changed = map.len() != before;
+            for val in map.values_mut() {
+                if strip_tid_refs(val, tid) {
+                    changed = true;
+                }
+            }
+            changed
+        }
+        _ => false,
+    }
+}
+fn contains_bytes(hay: &[u8], needle: &[u8]) -> bool {
+    if needle.is_empty() || needle.len() > hay.len() {
+        return false;
+    }
+    let first = needle[0];
+    let rest = &needle[1..];
+    let limit = hay.len() - rest.len();
+    let mut i = 0usize;
+    while i < limit {
+        if let Some(pos) = hay[i..limit].iter().position(|&b| b == first) {
+            let start = i + pos;
+            if &hay[start + 1..start + needle.len()] == rest {
+                return true;
+            }
+            i = start + 1;
+        } else {
+            break;
+        }
+    }
+    false
+}
+fn codex_raw_skip_visit(raw: &[u8]) -> bool {
+    (contains_bytes(raw, b"token_count")
+        || contains_bytes(raw, b"turn_context")
+        || contains_bytes(raw, b"session_meta"))
+        && !contains_bytes(raw, b"response_item")
+        && !contains_bytes(raw, b"task_complete")
+        && !contains_bytes(raw, b"turn_aborted")
+}
 fn cut_candidate(path: &Path, dst: &mut File, ranges: &[CutRange], renumber: bool) -> Result<()> {
-    let mut f = BufReader::new(File::open(path)?);
+    let mut f = BufReader::with_capacity(256 * 1024, File::open(path)?);
+    let mut writer = BufWriter::with_capacity(256 * 1024, dst);
     let mut offset = 0;
     let mut new_ordinal = None;
     loop {
@@ -1780,10 +2406,11 @@ fn cut_candidate(path: &Path, dst: &mut File, ranges: &[CutRange], renumber: boo
                 raw = serde_json::to_vec(&v)?;
                 raw.extend(ending);
             }
-            dst.write_all(&raw)?;
+            writer.write_all(&raw)?;
         }
         offset += n as u64;
     }
+    writer.flush()?;
     Ok(())
 }
 fn edit_info(v: &Value) -> Result<Value> {
@@ -1812,7 +2439,7 @@ fn edit_info(v: &Value) -> Result<Value> {
             json!({"old":j::text(pl.get("input").unwrap_or(&pl["arguments"])),"kind":"tool_call","label":format!("Вызов инструмента: {}",if j::s(pl,"name").is_empty(){pt}else{j::s(pl,"name")}),"role":null,"pt":pt,"mirror_events":false})
         }
         "custom_tool_call_output" | "function_call_output" => {
-            json!({"old":j::text(&pl["output"]),"kind":"tool_output","label":"Вывод инструмента","role":null,"pt":pt,"mirror_events":false})
+            json!({"old":output_text(&pl["output"]),"kind":"tool_output","label":"Вывод инструмента","role":null,"pt":pt,"mirror_events":false})
         }
         _ => bail!("Запись типа {pt} не поддерживает редактирование текста"),
     };
@@ -1896,9 +2523,17 @@ fn edit_candidate(path: &Path, dst: &mut File, offset: u64, text: &str) -> Resul
     let mirror = info["mirror_events"] == true && !old.trim().is_empty();
     let mut duplicates = 0;
     if mirror {
-        let f = BufReader::new(File::open(path)?);
-        for raw in f.split(b'\n') {
-            let raw = raw?;
+        let mut f = BufReader::with_capacity(256 * 1024, File::open(path)?);
+        let mut raw = Vec::new();
+        loop {
+            raw.clear();
+            let n = f.read_until(b'\n', &mut raw)?;
+            if n == 0 {
+                break;
+            }
+            if !contains_bytes(&raw, b"response_item") || !contains_bytes(&raw, b"message") {
+                continue;
+            }
             if let Ok(v) = serde_json::from_slice::<Value>(&raw) {
                 if j::s(&v, "type") == "response_item"
                     && j::s(&v["payload"], "type") == "message"
@@ -1912,10 +2547,12 @@ fn edit_candidate(path: &Path, dst: &mut File, offset: u64, text: &str) -> Resul
     let role = j::s(&target["payload"], "role").to_string();
     let id = target["payload"]["id"].clone();
     patch_item(&mut target["payload"], text)?;
-    let mut f = BufReader::new(File::open(path)?);
+    let mut f = BufReader::with_capacity(256 * 1024, File::open(path)?);
+    let mut writer = BufWriter::with_capacity(256 * 1024, dst);
     let (mut pos, mut changed) = (0, Vec::new());
+    let mut raw = Vec::new();
     loop {
-        let mut raw = Vec::new();
+        raw.clear();
         let n = f.read_until(b'\n', &mut raw)?;
         if n == 0 {
             break;
@@ -1924,27 +2561,37 @@ fn edit_candidate(path: &Path, dst: &mut File, offset: u64, text: &str) -> Resul
         if pos == offset {
             row = Some(target.clone())
         } else if mirror {
-            if let Ok(mut v) = serde_json::from_slice::<Value>(&raw) {
-                if j::s(&v, "type") == "event_msg" {
-                    let pl = &v["payload"];
-                    let item = &pl["item"];
-                    let item_id = item["id"].clone();
-                    let relevant = j::s(item, "type")
-                        == if role == "user" {
-                            "UserMessage"
-                        } else {
-                            "AgentMessage"
+            let may_mirror = contains_bytes(&raw, b"event_msg")
+                && if role == "assistant" {
+                    contains_bytes(&raw, b"AgentMessage")
+                        || contains_bytes(&raw, b"task_complete")
+                        || contains_bytes(&raw, b"agent_message")
+                } else {
+                    contains_bytes(&raw, b"UserMessage") || contains_bytes(&raw, b"user_message")
+                };
+            if may_mirror {
+                if let Ok(mut v) = serde_json::from_slice::<Value>(&raw) {
+                    if j::s(&v, "type") == "event_msg" {
+                        let pl = &v["payload"];
+                        let item = &pl["item"];
+                        let item_id = item["id"].clone();
+                        let relevant = j::s(item, "type")
+                            == if role == "user" {
+                                "UserMessage"
+                            } else {
+                                "AgentMessage"
+                            }
+                            || if role == "assistant" {
+                                matches!(j::s(pl, "type"), "task_complete" | "agent_message")
+                            } else {
+                                j::s(pl, "type") == "user_message"
+                            };
+                        if relevant && deep_replace(&mut v, old, text) {
+                            if duplicates > 1 && (item_id.is_null() || item_id != id) {
+                                bail!("Несколько сообщений имеют одинаковый текст; безопасно определить копию не удалось")
+                            };
+                            row = Some(v);
                         }
-                        || if role == "assistant" {
-                            matches!(j::s(pl, "type"), "task_complete" | "agent_message")
-                        } else {
-                            j::s(pl, "type") == "user_message"
-                        };
-                    if relevant && deep_replace(&mut v, old, text) {
-                        if duplicates > 1 && (item_id.is_null() || item_id != id) {
-                            bail!("Несколько сообщений имеют одинаковый текст; безопасно определить копию не удалось")
-                        };
-                        row = Some(v);
                     }
                 }
             }
@@ -1955,9 +2602,10 @@ fn edit_candidate(path: &Path, dst: &mut File, offset: u64, text: &str) -> Resul
             raw.extend(ending);
             changed.push(pos);
         }
-        dst.write_all(&raw)?;
+        writer.write_all(&raw)?;
         pos += n as u64;
     }
+    writer.flush()?;
     Ok(json!({"old":old,"new":text,"lines_changed":changed}))
 }
 fn attach_checked(c: &Connection, path: &Path) -> Result<()> {
@@ -1985,8 +2633,15 @@ fn attach_checked(c: &Connection, path: &Path) -> Result<()> {
     }
     Ok(())
 }
+fn block_presets_ref() -> &'static Value {
+    static PRESETS: OnceLock<Value> = OnceLock::new();
+    PRESETS.get_or_init(|| {
+        serde_json::from_str(include_str!("codex_block_presets.json"))
+            .expect("embedded block presets")
+    })
+}
 pub fn block_presets() -> Value {
-    serde_json::from_str(include_str!("codex_block_presets.json")).expect("embedded block presets")
+    block_presets_ref().clone()
 }
 fn normalized_code(v: &Value) -> String {
     if let Some(o) = v.as_object() {
@@ -2001,7 +2656,7 @@ fn normalized_code(v: &Value) -> String {
     }
 }
 fn code_variants(raw: &str) -> (String, String) {
-    for p in block_presets().as_array().unwrap() {
+    for p in block_presets_ref().as_array().unwrap() {
         if [j::s(p, "code"), j::s(p, "rollout_code"), j::s(p, "id")]
             .iter()
             .any(|s| s.eq_ignore_ascii_case(raw))

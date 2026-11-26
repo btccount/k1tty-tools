@@ -1,23 +1,44 @@
 use crate::{
     jsonl as j,
-    provider::{OpContext, Provider, ProviderPaths},
+    provider::{truncate_preview_item, EntryRef, OpContext, Provider, ProviderPaths},
 };
 use anyhow::{bail, ensure, Context, Result};
 use regex::Regex;
+use serde::de::{Deserialize, Deserializer, IgnoredAny, MapAccess, SeqAccess, Visitor};
 use serde_json::{json, Value};
 use std::{
+    borrow::Cow,
     collections::{HashMap, HashSet},
+    fmt,
     fs::{self, File},
-    io::{BufRead, BufReader},
+    io::{BufRead, BufReader, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
+    sync::{Mutex, OnceLock},
+    time::UNIX_EPOCH,
 };
+
+const PAGE_BYTE_BUDGET: usize = 2 * 1024 * 1024;
 
 pub struct ClaudeProvider {
     paths: ProviderPaths,
+    path_cache: Mutex<HashMap<String, PathBuf>>,
+    title_cache: Mutex<HashMap<PathBuf, (u64, u128, String, String)>>,
 }
 impl ClaudeProvider {
     pub fn new(paths: ProviderPaths) -> Self {
-        Self { paths }
+        Self {
+            paths,
+            path_cache: Mutex::new(HashMap::new()),
+            title_cache: Mutex::new(HashMap::new()),
+        }
+    }
+    fn invalidate_paths(&self, cid: Option<&str>) {
+        let mut cache = self.path_cache.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(cid) = cid {
+            cache.remove(cid);
+        } else {
+            cache.clear();
+        }
     }
     fn projects(&self) -> PathBuf {
         self.paths.root.join("projects")
@@ -47,24 +68,155 @@ impl ClaudeProvider {
     }
     fn session(&self, cid: &str) -> Result<PathBuf> {
         j::valid_id(cid)?;
-        self.files()
-            .into_iter()
-            .find(|p| p.file_stem().and_then(|n| n.to_str()) == Some(cid))
-            .with_context(|| format!("Файл сессии {cid} не найден"))
+        if let Some(p) = self
+            .path_cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(cid)
+            .cloned()
+        {
+            if p.is_file() {
+                return Ok(p);
+            }
+        }
+        let files = self.files();
+        let mut found = None;
+        let mut cache = self.path_cache.lock().unwrap_or_else(|e| e.into_inner());
+        for p in files {
+            if let Some(stem) = p.file_stem().and_then(|n| n.to_str()) {
+                if stem == cid {
+                    found = Some(p.clone());
+                }
+                cache.insert(stem.to_owned(), p);
+            }
+        }
+        found.with_context(|| format!("Файл сессии {cid} не найден"))
     }
     fn running(&self) -> Vec<String> {
         crate::process::snapshot()
             .remove("claude")
             .unwrap_or_default()
     }
-    fn revision(&self, cid: &str) -> Result<String> {
-        j::hash_file(&self.session(cid)?)
+    fn revision_path(path: &Path) -> Result<String> {
+        j::fast_revision(path)
     }
-    fn check_revision(&self, cid: &str, expected: &str) -> Result<()> {
-        if expected.is_empty() || self.revision(cid)? != expected {
+    fn check_revision_path(path: &Path, expected: &str) -> Result<()> {
+        if expected.is_empty() || Self::revision_path(path)? != expected {
             bail!("Сессия изменилась после предпросмотра. Обновите страницу и повторите действие.")
         }
         Ok(())
+    }
+    #[cfg(test)]
+    fn revision(&self, cid: &str) -> Result<String> {
+        Self::revision_path(&self.session(cid)?)
+    }
+    fn probe_lock_path(&self, path: &Path) -> Result<Option<String>> {
+        if j::LockedFile::open(path, false).is_err() {
+            return Ok(Some(
+                "Файл сессии занят Claude. Закройте активную сессию Claude и повторите.".into(),
+            ));
+        }
+        Ok(None)
+    }
+    fn find_desktop_sessions(&self, cid: &str) -> Vec<PathBuf> {
+        if self.test_mode() {
+            return Vec::new();
+        }
+        let Some(home) = dirs::home_dir() else {
+            return Vec::new();
+        };
+        let roots = [
+            home.join("AppData").join("Local").join("Claude-Data"),
+            home.join("AppData").join("Roaming").join("Claude"),
+            home.join("Library")
+                .join("Application Support")
+                .join("Claude"),
+            home.join(".config").join("Claude"),
+        ];
+        let mut out = Vec::new();
+        for root in roots {
+            if !root.is_dir() {
+                continue;
+            }
+            for entry in walkdir::WalkDir::new(&root)
+                .max_depth(5)
+                .follow_links(false)
+                .into_iter()
+                .filter_entry(|e| {
+                    if !e.file_type().is_dir() {
+                        return true;
+                    }
+                    let name = e.file_name().to_str().unwrap_or("");
+                    !matches!(
+                        name,
+                        "Cache"
+                            | "Code Cache"
+                            | "GPUCache"
+                            | "DawnGraphiteCache"
+                            | "DawnWebGPUCache"
+                            | "IndexedDB"
+                            | "Local Storage"
+                            | "Session Storage"
+                            | "Service Worker"
+                            | "blob_storage"
+                            | "Dictionaries"
+                            | "node_modules"
+                            | ".git"
+                    )
+                })
+                .filter_map(|e| e.ok())
+            {
+                if !entry.file_type().is_file() {
+                    continue;
+                }
+                let path = entry.path();
+                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                if !name.starts_with("local_") || !name.ends_with(".json") {
+                    continue;
+                }
+                if !path
+                    .components()
+                    .any(|c| c.as_os_str() == "claude-code-sessions")
+                {
+                    continue;
+                }
+                if let Ok(v) = j::load_json(path) {
+                    if j::s(&v, "cliSessionId") == cid {
+                        out.push(path.to_path_buf());
+                    }
+                }
+            }
+        }
+        out
+    }
+    fn touch_desktop_sessions(&self, cid: &str) {
+        if self.test_mode() {
+            return;
+        }
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        for p in self.find_desktop_sessions(cid) {
+            if let Ok(mut v) = j::load_json(&p) {
+                if let Some(obj) = v.as_object_mut() {
+                    obj.insert("lastActivityAt".into(), json!(now_ms));
+                    if let Ok(bytes) = serde_json::to_vec_pretty(&v) {
+                        let _ = crate::storage::atomic_write(&p, &bytes);
+                    }
+                }
+            }
+        }
+    }
+    fn post_mutate_warns(&self) -> Vec<String> {
+        let mut warns = Vec::new();
+        if !self.running().is_empty() {
+            warns.push(
+                "Обнаружен запущенный процесс Claude Code. Перезапустите сессию в терминале."
+                    .into(),
+            );
+        }
+        if self.test_mode() {
+            warns.push("ТЕСТ-РЕЖИМ: изменения сохранены в песочницу.".into());
+        }
+        warns
     }
     fn list(&self) -> Result<Vec<Value>> {
         let mut titles = HashMap::<String, String>::new();
@@ -81,8 +233,17 @@ impl ClaudeProvider {
                 }
             }
         }
+        let files = self.files();
+        {
+            let mut cache = self.path_cache.lock().unwrap_or_else(|e| e.into_inner());
+            for p in &files {
+                if let Some(stem) = p.file_stem().and_then(|n| n.to_str()) {
+                    cache.insert(stem.to_owned(), p.clone());
+                }
+            }
+        }
         let mut list = Vec::new();
-        for p in self.files() {
+        for p in files {
             let cid = p
                 .file_stem()
                 .unwrap_or_default()
@@ -94,7 +255,35 @@ impl ClaudeProvider {
                 .file_name()
                 .unwrap_or_default()
                 .to_string_lossy();
-            let (file_title, cwd) = extract_title(&p);
+            let meta = p.metadata()?;
+            let file_len = meta.len();
+            let mtime_dur = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(UNIX_EPOCH).ok());
+            let mtime_nanos = mtime_dur.map(|d| d.as_nanos()).unwrap_or(0);
+            let ts = mtime_dur.map(|d| d.as_secs_f64()).unwrap_or(0.);
+            let cached = self
+                .title_cache
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&p)
+                .and_then(|(l, m, t, c)| {
+                    (*l == file_len && *m == mtime_nanos).then(|| (t.clone(), c.clone()))
+                });
+            let (file_title, cwd) = if let Some(pair) = cached {
+                pair
+            } else {
+                let pair = extract_title(&p);
+                self.title_cache
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .insert(
+                        p.clone(),
+                        (file_len, mtime_nanos, pair.0.clone(), pair.1.clone()),
+                    );
+                pair
+            };
             let custom = p.parent().unwrap().join(&cid).join("custom-title.json");
             let title = j::load_json(&custom)
                 .ok()
@@ -109,8 +298,7 @@ impl ClaudeProvider {
                 decode_slug(&slug)
             };
             let badge = project.rsplit(['/', '\\']).next().unwrap_or("");
-            let ts = j::mtime(&p);
-            list.push(json!({"provider":"claude","id":cid,"title":title,"subtitle":project,"badge":if badge.is_empty(){"CL".to_string()}else{j::truncate(badge,16)},"size":p.metadata()?.len(),"mtime":j::display_time(ts),"mtime_ts":ts,"writable":true}));
+            list.push(json!({"provider":"claude","id":cid,"title":title,"subtitle":project,"badge":if badge.is_empty(){"CL".to_string()}else{j::truncate(badge,16)},"size":file_len,"mtime":j::display_time(ts),"mtime_ts":ts,"writable":true}));
         }
         list.sort_by(|a, b| {
             b["mtime_ts"]
@@ -128,9 +316,11 @@ impl ClaudeProvider {
             .map(|v| j::s(&v, "title").to_string())
             .unwrap_or_else(|| cid.into())
     }
-    fn entries(&self, data: &Value) -> Result<Value> {
-        let cid = j::required(data, "cid")?;
-        let path = self.session(cid)?;
+    fn read_page(
+        path: &Path,
+        data: &Value,
+        writable: bool,
+    ) -> Result<(Vec<Value>, Option<String>, usize)> {
         let include = data["include_tools"] == true;
         let limit = data["limit"].as_u64().unwrap_or(80).clamp(1, 150) as usize;
         let end = if let Some(b) = data["before"].as_str().filter(|b| !b.is_empty()) {
@@ -142,14 +332,13 @@ impl ClaudeProvider {
         } else {
             None
         };
+        let max_items = if include { 350 } else { limit * 2 };
         let mut items = Vec::new();
-        let mut msgs = 0;
+        let mut msgs = 0usize;
+        let mut page_bytes = 0usize;
         let mut cursor = None;
         j::reverse_lines(File::open(path)?, end, |off, raw| {
-            if !include
-                && !raw.windows(6).any(|w| w == b"\"text\"")
-                && !raw.windows(6).any(|w| w == b"\"user\"")
-            {
+            if !include && !claude_raw_may_be_dialogue(raw) {
                 return Ok(true);
             }
             let Ok(v) = serde_json::from_slice::<Value>(raw) else {
@@ -165,18 +354,165 @@ impl ClaudeProvider {
             if matches!(k, "user" | "assistant") {
                 msgs += 1;
             }
-            items.push(entry(it, true));
-            if msgs >= limit || items.len() >= 2000 {
+            let mut built = entry(it, writable);
+            truncate_preview_item(&mut built);
+            page_bytes += built["text"].as_str().map(str::len).unwrap_or(0);
+            items.push(built);
+            if msgs >= limit
+                || items.len() >= max_items
+                || (!items.is_empty() && page_bytes >= PAGE_BYTE_BUDGET)
+            {
                 cursor = (off > 0).then(|| format!("b{off}"));
                 return Ok(false);
             }
             Ok(true)
         })?;
         items.reverse();
-        let lock = self.probe_lock(Some(cid))?;
-        Ok(
-            json!({"provider":"claude","cid":cid,"turns":j::turns(items),"page_msgs":msgs,"total_label":format!("загружено: {msgs}"),"cursor":cursor,"has_more":cursor.is_some(),"writable":true,"file_locked":lock.is_some(),"lock_reason":lock.unwrap_or_default()}),
-        )
+        Ok((items, cursor, msgs))
+    }
+    fn resolve_key_offset(path: &Path, key: &str) -> Result<u64> {
+        if let Some(off_str) = key.strip_prefix('b') {
+            return Ok(off_str.parse::<u64>()?);
+        }
+        let mut reader = BufReader::with_capacity(128 * 1024, File::open(path)?);
+        let mut raw = Vec::new();
+        let mut off = 0u64;
+        loop {
+            raw.clear();
+            let n = reader.read_until(b'\n', &mut raw)?;
+            if n == 0 {
+                break;
+            }
+            if let Ok(v) = serde_json::from_slice::<Value>(&raw) {
+                if j::s(&v, "uuid") == key
+                    || history_item(&v, off).is_some_and(|it| j::s(&it, "key") == key)
+                {
+                    return Ok(off);
+                }
+            }
+            off += n as u64;
+        }
+        bail!("Запись с ключом {key} не найдена в сессии")
+    }
+    fn read_page_around(
+        path: &Path,
+        data: &Value,
+        writable: bool,
+        around_key: &str,
+    ) -> Result<(Vec<Value>, Option<String>, usize, bool)> {
+        let include = data["include_tools"] == true;
+        let limit = data["limit"].as_u64().unwrap_or(80).clamp(1, 150) as usize;
+        let target_off = Self::resolve_key_offset(path, around_key)?;
+
+        let after_limit = (limit / 2).max(15);
+        let after_max_items = if include { 120 } else { limit };
+        let half_budget = PAGE_BYTE_BUDGET / 2;
+        let mut after_items = Vec::new();
+        let mut after_msgs = 0usize;
+        let mut after_bytes = 0usize;
+        let mut has_newer = false;
+
+        let mut f = File::open(path)?;
+        f.seek(SeekFrom::Start(target_off))?;
+        let mut reader = BufReader::with_capacity(64 * 1024, f);
+        let mut raw = Vec::new();
+        let mut off = target_off;
+        loop {
+            raw.clear();
+            let n = reader.read_until(b'\n', &mut raw)?;
+            if n == 0 {
+                break;
+            }
+            let cur_off = off;
+            off += n as u64;
+            let is_target = cur_off == target_off;
+            if !is_target && !include && !claude_raw_may_be_dialogue(&raw) {
+                continue;
+            }
+            let Ok(v) = serde_json::from_slice::<Value>(&raw) else {
+                continue;
+            };
+            let Some(it) = history_item(&v, cur_off) else {
+                continue;
+            };
+            let k = j::s(&it, "kind");
+            if !is_target && !include && !matches!(k, "user" | "assistant") {
+                continue;
+            }
+            if !after_items.is_empty()
+                && (after_msgs >= after_limit
+                    || after_items.len() >= after_max_items
+                    || after_bytes >= half_budget)
+            {
+                has_newer = true;
+                break;
+            }
+            if matches!(k, "user" | "assistant") {
+                after_msgs += 1;
+            }
+            let mut built = entry(it, writable);
+            truncate_preview_item(&mut built);
+            after_bytes += built["text"].as_str().map(str::len).unwrap_or(0);
+            after_items.push(built);
+        }
+
+        let before_limit = limit.saturating_sub(after_msgs).max(15);
+        let before_max_items = if include { 120 } else { limit };
+        let mut before_items = Vec::new();
+        let mut before_msgs = 0usize;
+        let mut before_bytes = 0usize;
+        let mut cursor = None;
+        j::reverse_lines(File::open(path)?, Some(target_off), |line_off, line_raw| {
+            if !include && !claude_raw_may_be_dialogue(line_raw) {
+                return Ok(true);
+            }
+            let Ok(v) = serde_json::from_slice::<Value>(line_raw) else {
+                return Ok(true);
+            };
+            let Some(it) = history_item(&v, line_off) else {
+                return Ok(true);
+            };
+            let k = j::s(&it, "kind");
+            if !include && !matches!(k, "user" | "assistant") {
+                return Ok(true);
+            }
+            if matches!(k, "user" | "assistant") {
+                before_msgs += 1;
+            }
+            let mut built = entry(it, writable);
+            truncate_preview_item(&mut built);
+            before_bytes += built["text"].as_str().map(str::len).unwrap_or(0);
+            before_items.push(built);
+            if before_msgs >= before_limit
+                || before_items.len() >= before_max_items
+                || (!before_items.is_empty() && before_bytes >= half_budget)
+            {
+                cursor = (line_off > 0).then(|| format!("b{line_off}"));
+                return Ok(false);
+            }
+            Ok(true)
+        })?;
+
+        before_items.reverse();
+        before_items.extend(after_items);
+        Ok((before_items, cursor, before_msgs + after_msgs, has_newer))
+    }
+    fn entries(&self, data: &Value) -> Result<Value> {
+        let cid = j::required(data, "cid")?;
+        let path = self.session(cid)?;
+        let (items, cursor, msgs, has_newer) =
+            if let Some(around) = data["around_key"].as_str().filter(|s| !s.is_empty()) {
+                Self::read_page_around(&path, data, true, around)?
+            } else {
+                let (items, cursor, msgs) = Self::read_page(&path, data, true)?;
+                (items, cursor, msgs, false)
+            };
+        let lock = self.probe_lock_path(&path)?;
+        let mut resp = json!({"provider":"claude","cid":cid,"turns":j::turns(items),"page_msgs":msgs,"total_label":format!("загружено: {msgs}"),"cursor":cursor,"has_more":cursor.is_some(),"writable":true,"file_locked":lock.is_some(),"lock_reason":lock.unwrap_or_default()});
+        if has_newer {
+            resp["has_newer"] = json!(true);
+        }
+        Ok(resp)
     }
     fn target(&self, path: &Path, key: &str) -> Result<(Vec<j::Line>, usize, Value)> {
         let lines = j::read_lines(path)?;
@@ -195,10 +531,17 @@ impl ClaudeProvider {
     }
     fn edit_preview(&self, data: &Value) -> Result<Value> {
         let cid = j::required(data, "cid")?;
-        let rev = self.revision(cid)?;
-        let (_, _, v) = self.target(&self.session(cid)?, j::required(data, "key")?)?;
+        let path = self.session(cid)?;
+        let rev = Self::revision_path(&path)?;
+        let key = j::required(data, "key")?;
+        let v = if let Some(off_str) = key.strip_prefix('b') {
+            let off = off_str.parse::<u64>()?;
+            j::read_at(&path, off)?.obj()?
+        } else {
+            self.target(&path, key)?.2
+        };
         let (text, kind) = edit_info(&v);
-        self.check_revision(cid, &rev)?;
+        Self::check_revision_path(&path, &rev)?;
         Ok(
             json!({"text":text,"kind":kind,"hint":"Изменение сохранится прямо в JSONL-файл сессии Claude Code. Перед записью создаётся автоматическая резервная копия.","revision":rev,"writable":true}),
         )
@@ -209,21 +552,26 @@ impl ClaudeProvider {
         if !matches!(mode, "head" | "tail") {
             bail!("Недопустимый режим обрезки")
         };
-        let rev = self.revision(cid)?;
-        let (lines, idx, _) = self.target(&self.session(cid)?, j::required(data, "key")?)?;
+        let path = self.session(cid)?;
+        let rev = Self::revision_path(&path)?;
+        let (lines, idx, _) = self.target(&path, j::required(data, "key")?)?;
         let cut = if mode == "tail" {
             &lines[idx..]
         } else {
             &lines[..idx]
         };
         let raw = cut_report(cid, mode, cut);
-        self.check_revision(cid, &rev)?;
+        Self::check_revision_path(&path, &rev)?;
         Ok(
             json!({"report":{"provider":"claude","mode":mode,"steps_count":raw["will_delete"]["steps_preview_count"],"raw_count":raw["rollout_lines"],"raw_label":"строк JSONL","bytes":raw["bytes"],"extra_label":"DAG-целостность сохраняется","steps_preview":raw["will_delete"]["steps_preview"],"raw":raw},"revision":rev,"writable":true,"hint":"Будут удалены записи из JSONL-файла сессии. При обрезке сверху выбранная запись станет новым корнем (parentUuid = null). Создаётся полная резервная копия."}),
         )
     }
+    #[cfg(test)]
     fn backup(&self, cid: &str, tag: &str) -> Result<PathBuf> {
         let path = self.session(cid)?;
+        self.backup_path(&path, cid, tag)
+    }
+    fn backup_path(&self, path: &Path, cid: &str, tag: &str) -> Result<PathBuf> {
         let bdir = self
             .paths
             .backup_root
@@ -234,13 +582,13 @@ impl ClaudeProvider {
             .file_name()
             .context("Нет имени файла")?
             .to_string_lossy();
-        let sha = j::copy_checked(&path, &bdir.join(file_name.as_ref()))?;
-        let raw = fs::read(&path)?;
+        let (sha, line_count, file_size) =
+            j::copy_checked_with_stats(path, &bdir.join(file_name.as_ref()))?;
         let custom = path.parent().unwrap().join(cid).join("custom-title.json");
         if custom.is_file() {
             j::copy_checked(&custom, &bdir.join("custom-title.json"))?;
         }
-        let mut meta = json!({"tid":cid,"tag":tag,"created":bdir.file_name().unwrap().to_string_lossy(),"file_name":file_name,"project_slug":path.parent().unwrap().file_name().unwrap_or_default().to_string_lossy(),"relative_path":path.strip_prefix(self.projects())?.to_string_lossy(),"sha256":sha,"lines":raw.iter().filter(|&&b|b==b'\n').count()+usize::from(!raw.is_empty()&&!raw.ends_with(b"\n")),"size":raw.len()});
+        let mut meta = json!({"tid":cid,"tag":tag,"created":bdir.file_name().unwrap().to_string_lossy(),"file_name":file_name,"project_slug":path.parent().unwrap().file_name().unwrap_or_default().to_string_lossy(),"relative_path":path.strip_prefix(self.projects())?.to_string_lossy(),"sha256":sha,"lines":line_count,"size":file_size});
         if tag == "delete_conv" {
             let sub = path.parent().unwrap().join(cid);
             if sub.is_dir() {
@@ -258,6 +606,20 @@ impl ClaudeProvider {
                     .collect();
                 meta["history_lines"] = json!(saved);
             }
+            let desktop_files = self.find_desktop_sessions(cid);
+            if !desktop_files.is_empty() {
+                let mut desktop_saved = Vec::new();
+                for (idx, src) in desktop_files.iter().enumerate() {
+                    let fname = src.file_name().unwrap_or_default().to_string_lossy();
+                    let rel = format!("desktop-sessions/{idx}_{fname}");
+                    j::copy_checked(src, &bdir.join(&rel))?;
+                    desktop_saved.push(json!({
+                        "backup_file": rel,
+                        "original_path": src.to_string_lossy()
+                    }));
+                }
+                meta["desktop_sessions"] = json!(desktop_saved);
+            }
         }
         j::save_json(&bdir.join("backup.meta.json"), &meta)?;
         Ok(bdir)
@@ -265,11 +627,17 @@ impl ClaudeProvider {
     fn system_notices_info(&self, data: &Value) -> Result<Value> {
         let cid = j::required(data, "cid")?;
         let path = self.session(cid)?;
-        let revision = self.revision(cid)?;
+        let revision = Self::revision_path(&path)?;
         let mut counts = notice_counts();
         let mut total = 0;
-        for raw in BufReader::new(File::open(&path)?).split(b'\n') {
-            let raw = raw?;
+        let mut reader = BufReader::with_capacity(256 * 1024, File::open(&path)?);
+        let mut raw = Vec::new();
+        loop {
+            raw.clear();
+            let n = reader.read_until(b'\n', &mut raw)?;
+            if n == 0 {
+                break;
+            }
             if let Ok(value) = serde_json::from_slice::<Value>(&raw) {
                 if let Some(kind) = system_notice_type(&value) {
                     counts[kind] = json!(counts[kind].as_u64().unwrap_or(0) + 1);
@@ -277,11 +645,11 @@ impl ClaudeProvider {
                 }
             }
         }
-        self.check_revision(cid, &revision)?;
+        Self::check_revision_path(&path, &revision)?;
         let lock = if path.metadata()?.permissions().readonly() {
             Some("Файл сессии доступен только для чтения.".to_owned())
         } else {
-            self.probe_lock(Some(cid))?
+            self.probe_lock_path(&path)?
         };
         Ok(json!({
             "provider":"claude","cid":cid,"revision":revision,
@@ -300,13 +668,9 @@ impl ClaudeProvider {
             path.display()
         );
         let mut locked = j::LockedFile::open(&path, false)?;
-        self.check_revision(cid, revision)?;
+        Self::check_revision_path(&path, revision)?;
         let mut lines = j::read_lines(&path)?;
         let original = j::write_lines(&lines);
-        ensure!(
-            j::sha(&original) == revision,
-            "Сессия изменилась после предпросмотра. Повторите действие."
-        );
         let mut deleted_keys = Vec::new();
         let mut deleted_uuids = Vec::new();
         let mut added_entry = Value::Null;
@@ -424,13 +788,13 @@ impl ClaudeProvider {
         }
         let backup = if ctx.auto_backup {
             ctx.phase("backup");
-            Some(self.backup(cid, op)?)
+            Some(self.backup_path(&path, cid, op)?)
         } else {
             None
         };
         ctx.phase("write");
         let bytes = j::write_lines(&lines);
-        self.check_revision(cid, revision)?;
+        Self::check_revision_path(&path, revision)?;
         if let Err(error) = locked.replace_bytes(&bytes) {
             locked
                 .replace_bytes(&original)
@@ -442,9 +806,10 @@ impl ClaudeProvider {
                 )
             });
         }
+        let new_revision = Self::revision_path(&path)?;
         ctx.phase("done");
         Ok(json!({
-            "provider":"claude","cid":cid,"tid":cid,"revision":j::sha(&bytes),
+            "provider":"claude","cid":cid,"tid":cid,"revision":new_revision,
             "changed":true,"no_op":false,"added":added,"entry":added_entry,
             "deleted_count":deleted_keys.len(),"deleted_keys":deleted_keys,
             "deleted_uuids":deleted_uuids,"backup":backup,"warns":[]
@@ -457,7 +822,133 @@ impl ClaudeProvider {
         let key = j::required(data, "key")?;
         let mut locked = j::LockedFile::open(&path, false)?;
         if op != "delete_single" || !j::s(data, "revision").is_empty() {
-            self.check_revision(cid, j::s(data, "revision"))?;
+            Self::check_revision_path(&path, j::s(data, "revision"))?;
+        }
+        if op == "apply_edit" {
+            if let Some(off) = key.strip_prefix('b').and_then(|s| s.parse::<u64>().ok()) {
+                let text = j::s(data, "text");
+                if text.trim().is_empty() {
+                    bail!("Пустой текст, сохранение отменено.")
+                }
+                let line = j::read_at(&path, off)?;
+                let old_line_len = line.raw.len();
+                let obj = line.obj()?;
+                let old = edit_info(&obj).0;
+                let mut edited = obj;
+                set_text(&mut edited, text)?;
+                let mut new_raw = serde_json::to_vec(&edited)?;
+                new_raw.extend_from_slice(j::ending(&line.raw));
+                let bdir = if ctx.auto_backup {
+                    ctx.phase("backup");
+                    Some(self.backup_path(&path, cid, "web_edit")?)
+                } else {
+                    None
+                };
+                let fallback_tail = if bdir.is_none() && new_raw.len() != old_line_len {
+                    let file_len = path.metadata()?.len();
+                    if file_len.saturating_sub(off) <= 16 * 1024 * 1024 {
+                        let mut f = File::open(&path)?;
+                        f.seek(SeekFrom::Start(off))?;
+                        let mut tail = Vec::new();
+                        f.read_to_end(&mut tail)?;
+                        Some(tail)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                ctx.phase("edit");
+                if let Err(error) = locked.replace_tail(off, &new_raw, old_line_len) {
+                    if let Some(b) = &bdir {
+                        if let Some(name) = path.file_name() {
+                            let src = b.join(name);
+                            if src.is_file() {
+                                let _ = locked.replace_from(&src);
+                            }
+                        }
+                    } else if let Some(tail) = fallback_tail {
+                        let _ = locked.file.seek(SeekFrom::Start(off));
+                        let _ = std::io::Write::write_all(&mut locked.file, &tail);
+                        let _ = locked.file.set_len(off + tail.len() as u64);
+                        let _ = locked.file.sync_all();
+                    }
+                    return Err(error);
+                }
+                drop(locked);
+                self.touch_desktop_sessions(cid);
+                ctx.phase("leak");
+                let mut rep = json!({"tid":cid,"key":key,"old":old,"updated":true});
+                rep["leaks"] = j::leak_check(&[path, self.history()], &[]);
+                rep["backup"] = json!(bdir);
+                rep["warns"] = json!(self.post_mutate_warns());
+                ctx.phase("done");
+                return Ok(rep);
+            }
+        }
+        if op == "apply_cut" && j::s(data, "mode") == "tail" {
+            if let Some(off) = key.strip_prefix('b').and_then(|s| s.parse::<u64>().ok()) {
+                let first_line = j::read_at(&path, off)?;
+                let _ = first_line.obj()?;
+                let mut f = File::open(&path)?;
+                f.seek(SeekFrom::Start(off))?;
+                let mut reader = BufReader::with_capacity(256 * 1024, f);
+                let mut raw = Vec::new();
+                let mut cur_off = off;
+                let mut rollout_lines = 0usize;
+                let mut bytes = 0usize;
+                let mut count = 0usize;
+                let mut preview = Vec::new();
+                let mut removed = Vec::new();
+                loop {
+                    raw.clear();
+                    let n = reader.read_until(b'\n', &mut raw)?;
+                    if n == 0 {
+                        break;
+                    }
+                    rollout_lines += 1;
+                    bytes += raw.len();
+                    if claude_raw_may_be_entry(&raw) {
+                        if let Ok(v) = serde_json::from_slice::<Value>(&raw) {
+                            if let Some(it) = history_item(&v, cur_off) {
+                                count += 1;
+                                if preview.len() < 12 {
+                                    preview.push(json!({"key":"b0","label":it["label"],"text":j::truncate(&j::s(&it,"text").replace('\n'," "),120)}));
+                                }
+                                removed.push(j::s(&it, "text").to_string());
+                            }
+                        }
+                    }
+                    cur_off += n as u64;
+                }
+                let mut rep = json!({"thread":cid,"mode":"tail","rollout_lines":rollout_lines,"rollout_files":0,"bytes":bytes,"will_delete":{"steps_preview_count":count,"steps_preview":preview}});
+                let bdir = if ctx.auto_backup {
+                    ctx.phase("backup");
+                    Some(self.backup_path(&path, cid, "web_cut")?)
+                } else {
+                    None
+                };
+                ctx.phase("cut");
+                if let Err(error) = locked.truncate_at(off) {
+                    if let Some(b) = &bdir {
+                        if let Some(name) = path.file_name() {
+                            let src = b.join(name);
+                            if src.is_file() {
+                                let _ = locked.replace_from(&src);
+                            }
+                        }
+                    }
+                    return Err(error);
+                }
+                drop(locked);
+                self.touch_desktop_sessions(cid);
+                ctx.phase("leak");
+                rep["leaks"] = j::leak_check(&[path, self.history()], &removed);
+                rep["backup"] = json!(bdir);
+                rep["warns"] = json!(self.post_mutate_warns());
+                ctx.phase("done");
+                return Ok(rep);
+            }
         }
         let (mut lines, idx, obj) = self.target(&path, key)?;
         let original = j::write_lines(&lines);
@@ -468,7 +959,7 @@ impl ClaudeProvider {
         };
         let bdir = if ctx.auto_backup {
             ctx.phase("backup");
-            Some(self.backup(cid, tag)?)
+            Some(self.backup_path(&path, cid, tag)?)
         } else {
             None
         };
@@ -491,12 +982,33 @@ impl ClaudeProvider {
                 ctx.phase("cut");
                 let uuid = obj["uuid"].clone();
                 let parent = obj["parentUuid"].clone();
+                let logical_parent = obj
+                    .get("logicalParentUuid")
+                    .or_else(|| obj.get("parentUuid"))
+                    .cloned()
+                    .unwrap_or(Value::Null);
                 lines.remove(idx);
                 if !uuid.is_null() {
+                    let uuid_bytes = uuid.as_str().unwrap_or("").as_bytes();
                     for line in &mut lines {
+                        if !uuid_bytes.is_empty() && !contains_bytes(&line.raw, uuid_bytes) {
+                            continue;
+                        }
                         if let Ok(mut row) = line.obj() {
-                            if row["parentUuid"] == uuid {
+                            let mut changed = false;
+                            if row.get("parentUuid") == Some(&uuid) {
                                 row["parentUuid"] = parent.clone();
+                                changed = true;
+                            }
+                            if row.get("logicalParentUuid") == Some(&uuid) {
+                                row["logicalParentUuid"] = logical_parent.clone();
+                                changed = true;
+                            }
+                            if row.get("leafUuid") == Some(&uuid) {
+                                row["leafUuid"] = parent.clone();
+                                changed = true;
+                            }
+                            if changed {
                                 line.set(&row)?;
                             }
                         }
@@ -561,20 +1073,12 @@ impl ClaudeProvider {
                 .context("Не удалось восстановить исходный файл после ошибки записи")?;
             return Err(error);
         }
+        drop(locked);
+        self.touch_desktop_sessions(cid);
         ctx.phase("leak");
         rep["leaks"] = j::leak_check(&[path, self.history()], &removed);
         rep["backup"] = json!(bdir);
-        let mut warns = Vec::<String>::new();
-        if !self.running().is_empty() {
-            warns.push(
-                "Обнаружен запущенный процесс Claude Code. Перезапустите сессию в терминале."
-                    .into(),
-            );
-        }
-        if self.test_mode() {
-            warns.push("ТЕСТ-РЕЖИМ: изменения сохранены в песочницу.".into());
-        }
-        rep["warns"] = json!(warns);
+        rep["warns"] = json!(self.post_mutate_warns());
         ctx.phase("done");
         Ok(rep)
     }
@@ -585,13 +1089,14 @@ impl ClaudeProvider {
         let guard = j::LockedFile::open(&path, false)?;
         let bdir = if ctx.auto_backup {
             ctx.phase("backup");
-            Some(self.backup(cid, "delete_conv")?)
+            Some(self.backup_path(&path, cid, "delete_conv")?)
         } else {
             None
         };
         ctx.phase("cut");
         drop(guard);
         fs::remove_file(&path)?;
+        self.invalidate_paths(Some(cid));
         let sub = path.parent().unwrap().join(cid);
         if sub.is_dir() {
             fs::remove_dir_all(sub)?;
@@ -603,6 +1108,11 @@ impl ClaudeProvider {
                 .filter(|l| !l.obj().is_ok_and(|v| j::s(&v, "sessionId") == cid))
                 .collect();
             j::atomic_write(&self.history(), &j::write_lines(&kept))?;
+        }
+        if !self.test_mode() {
+            for p in self.find_desktop_sessions(cid) {
+                let _ = fs::remove_file(p);
+            }
         }
         ctx.phase("done");
         Ok(
@@ -697,31 +1207,9 @@ impl ClaudeProvider {
                 .to_string_lossy()
                 .into_owned()
         };
-        let include = data["include_tools"] == true;
-        let flat: Vec<_> = j::read_lines(&src)?
-            .iter()
-            .filter_map(|l| l.obj().ok().and_then(|v| history_item(&v, l.offset)))
-            .filter(|v| include || matches!(j::s(v, "kind"), "user" | "assistant"))
-            .map(|v| entry(v, false))
-            .collect();
-        let count = flat.len();
-        let end = data["before"]
-            .as_str()
-            .and_then(|s| s.parse::<usize>().ok())
-            .unwrap_or(count)
-            .min(count);
-        let limit = data["limit"].as_u64().unwrap_or(80).clamp(1, 150) as usize;
-        let max = if include { 350 } else { limit * 2 };
-        let (mut start, mut msgs) = (end, 0);
-        while start > 0 && msgs < limit && end - start < max {
-            start -= 1;
-            if matches!(j::s(&flat[start], "kind"), "user" | "assistant") {
-                msgs += 1;
-            }
-        }
-        let window = &flat[start..end];
+        let (items, cursor, msgs) = Self::read_page(&src, data, false)?;
         Ok(
-            json!({"provider":"claude","cid":cid,"backup_dir":bdir,"backup_name":bdir.file_name().unwrap().to_string_lossy(),"title":self.backup_title(&bdir,&cid,Some(&src)),"readonly":true,"turns":if window.is_empty(){json!([])}else{json!([{"items":window}])},"page_msgs":msgs,"total_label":format!("записей: {count}"),"cursor":if start>0{Some(start.to_string())}else{None},"has_more":start>0,"writable":false}),
+            json!({"provider":"claude","cid":cid,"backup_dir":bdir,"backup_name":bdir.file_name().unwrap().to_string_lossy(),"title":self.backup_title(&bdir,&cid,Some(&src)),"readonly":true,"turns":j::turns(items),"page_msgs":msgs,"total_label":format!("загружено: {msgs}"),"cursor":cursor,"has_more":cursor.is_some(),"writable":false}),
         )
     }
     fn restore(&self, data: &Value, ctx: &OpContext) -> Result<Value> {
@@ -758,6 +1246,7 @@ impl ClaudeProvider {
         } else {
             j::atomic_write(&target, &fs::read(&src)?)?;
         }
+        self.invalidate_paths(None);
         let custom = bdir.join("custom-title.json");
         if custom.is_file() {
             j::copy_checked(
@@ -785,18 +1274,61 @@ impl ClaudeProvider {
             }
             j::atomic_write(&self.history(), raw.as_bytes())?;
         }
+        if !self.test_mode() {
+            if let Some(arr) = meta.get("desktop_sessions").and_then(Value::as_array) {
+                for item in arr {
+                    let backup_file = j::s(item, "backup_file");
+                    let original_path = j::s(item, "original_path");
+                    if backup_file.is_empty() || original_path.is_empty() {
+                        continue;
+                    }
+                    let Ok(src) = j::safe_join(&bdir, backup_file) else {
+                        continue;
+                    };
+                    if !src.is_file() {
+                        continue;
+                    }
+                    let dst = PathBuf::from(original_path);
+                    let valid_dst = dst
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .is_some_and(|n| n.starts_with("local_") && n.ends_with(".json"))
+                        && dst
+                            .components()
+                            .any(|c| c.as_os_str() == "claude-code-sessions");
+                    if valid_dst {
+                        if let Some(parent) = dst.parent() {
+                            let _ = fs::create_dir_all(parent);
+                        }
+                        if let Ok(bytes) = fs::read(&src) {
+                            let _ = crate::storage::atomic_write(&dst, &bytes);
+                        }
+                    }
+                }
+            }
+        }
         ctx.phase("done");
         Ok(json!({"restored":bdir,"target":target}))
     }
     fn export(&self, data: &Value) -> Result<Value> {
+        static REMINDER_RE: OnceLock<Regex> = OnceLock::new();
         let cid = j::required(data, "cid")?;
         let p = self.session(cid)?;
         let (_, cwd) = extract_title(&p);
-        let remove = Regex::new(r"<system-reminder>[\s\S]*?</system-reminder>\s*")?;
+        let remove = REMINDER_RE
+            .get_or_init(|| Regex::new(r"<system-reminder>[\s\S]*?</system-reminder>\s*").unwrap());
         let mut entries = Vec::new();
-        for line in j::read_lines(&p)? {
-            if let Ok(obj) = line.obj() {
-                if let Some(it) = history_item(&obj, line.offset) {
+        let mut reader = BufReader::with_capacity(256 * 1024, File::open(&p)?);
+        let mut raw = Vec::new();
+        let mut offset = 0u64;
+        loop {
+            raw.clear();
+            let n = reader.read_until(b'\n', &mut raw)?;
+            if n == 0 {
+                break;
+            }
+            if let Ok(obj) = serde_json::from_slice::<Value>(&raw) {
+                if let Some(it) = history_item(&obj, offset) {
                     let k = j::s(&it, "kind");
                     let mut text = j::s(&it, "text").to_string();
                     if k == "user" {
@@ -806,6 +1338,7 @@ impl ClaudeProvider {
                         }
                     }
                     if text.trim().is_empty() && j::s(&it, "tool").is_empty() {
+                        offset += n as u64;
                         continue;
                     }
                     let mut exported = json!({"kind":k,"subtype":it.get("subtype").cloned().unwrap_or(json!(k)),"label":it.get("label").cloned().unwrap_or(json!(k)),"text":text,"ts":it["ts"],"tool":it["tool"],"status":it["status"],"code":""});
@@ -822,6 +1355,7 @@ impl ClaudeProvider {
                     entries.push(exported);
                 }
             }
+            offset += n as u64;
         }
         Ok(j::normalized_doc(
             "claude",
@@ -836,7 +1370,6 @@ impl ClaudeProvider {
     fn preview_slim(&self, data: &Value) -> Result<Value> {
         let cid = j::required(data, "cid")?;
         let path = self.session(cid)?;
-        let lines = j::read_lines(&path)?;
         let threshold = (data["tool_threshold_kb"]
             .as_u64()
             .unwrap_or(4)
@@ -846,19 +1379,32 @@ impl ClaudeProvider {
         let mut thinking_bytes = 0usize;
         let mut heavy_tool_count = 0usize;
         let mut heavy_tool_bytes = 0usize;
-        for line in &lines {
-            let Ok(obj) = line.obj() else { continue };
+        let mut reader = BufReader::with_capacity(256 * 1024, File::open(&path)?);
+        let mut raw = Vec::new();
+        loop {
+            raw.clear();
+            let n = reader.read_until(b'\n', &mut raw)?;
+            if n == 0 {
+                break;
+            }
+            if !contains_bytes(&raw, b"\"thinking\"")
+                && !contains_bytes(&raw, b"\"redacted_thinking\"")
+                && !contains_bytes(&raw, b"\"tool_result\"")
+            {
+                continue;
+            }
+            let Ok(obj) = serde_json::from_slice::<Value>(&raw) else {
+                continue;
+            };
             if let Some(arr) = obj["message"]["content"].as_array() {
                 for item in arr {
                     let typ = j::s(item, "type");
                     if matches!(typ, "thinking" | "redacted_thinking") {
-                        let sz = serde_json::to_vec(item).map(|b| b.len()).unwrap_or(0);
+                        let sz = j::json_serialized_len(item);
                         thinking_count += 1;
                         thinking_bytes += sz;
                     } else if typ == "tool_result" {
-                        let sz = serde_json::to_vec(&item["content"])
-                            .map(|b| b.len())
-                            .unwrap_or(0);
+                        let sz = j::json_serialized_len(&item["content"]);
                         if sz > threshold {
                             heavy_tool_count += 1;
                             heavy_tool_bytes += sz.saturating_sub(48);
@@ -936,9 +1482,7 @@ impl ClaudeProvider {
                         continue;
                     }
                     if trim_heavy_tools && typ == "tool_result" {
-                        let sz = serde_json::to_vec(&item["content"])
-                            .map(|b| b.len())
-                            .unwrap_or(0);
+                        let sz = j::json_serialized_len(&item["content"]);
                         if sz > threshold {
                             item["content"] = json!(format!(
                                 "[trimmed by K1tty Tools: {:.1} KB]",
@@ -959,7 +1503,7 @@ impl ClaudeProvider {
             if trim_heavy_tools && modified {
                 for key in ["toolUseResult", "tool_use_result"] {
                     if let Some(v) = obj.get(key) {
-                        let sz = serde_json::to_vec(v).map(|b| b.len()).unwrap_or(0);
+                        let sz = j::json_serialized_len(v);
                         if sz > threshold {
                             obj[key] = json!(format!(
                                 "[trimmed by K1tty Tools: {:.1} KB]",
@@ -1019,7 +1563,7 @@ impl ClaudeProvider {
         }
         let backup = if ctx.auto_backup {
             ctx.phase("backup");
-            Some(self.backup(cid, "slim")?)
+            Some(self.backup_path(&path, cid, "slim")?)
         } else {
             None
         };
@@ -1030,6 +1574,9 @@ impl ClaudeProvider {
             let _ = locked.replace_bytes(&original);
             return Err(error);
         }
+        drop(locked);
+        self.touch_desktop_sessions(cid);
+        let new_revision = Self::revision_path(&path)?;
         ctx.phase("done");
         Ok(json!({
             "provider": "claude",
@@ -1039,7 +1586,7 @@ impl ClaudeProvider {
             "tools_trimmed": tools_trimmed,
             "freed_bytes": freed_bytes,
             "freed_tokens": (freed_bytes + 3) / 4,
-            "revision": j::sha(&bytes),
+            "revision": new_revision,
             "backup": backup,
             "warns": if self.running().is_empty() { Vec::<String>::new() } else { vec!["Запущен Claude. Переоткройте сессию для обновления.".into()] }
         }))
@@ -1049,15 +1596,95 @@ impl Provider for ClaudeProvider {
     fn paths(&self) -> &ProviderPaths {
         &self.paths
     }
-    fn probe_lock(&self, cid: Option<&str>) -> Result<Option<String>> {
-        if let Some(cid) = cid {
-            #[cfg(not(windows))]
-            if !self.test_mode() {
-                let running = self.running();
-                if !running.is_empty() {
-                    return Ok(Some(format!("Запущено: {}. На macOS/Linux нельзя проверить, занят ли конкретный файл, поэтому закройте Claude перед правкой.",running.join(", "))));
+    fn visit_entries(&self, cid: &str, f: &mut dyn FnMut(EntryRef<'_>) -> bool) -> Result<()> {
+        let path = self.session(cid)?;
+        let mut reader = BufReader::with_capacity(256 * 1024, File::open(&path)?);
+        let mut raw = Vec::new();
+        let mut offset = 0u64;
+        loop {
+            raw.clear();
+            let n = reader.read_until(b'\n', &mut raw)?;
+            if n == 0 {
+                break;
+            }
+            if !claude_raw_may_be_entry(&raw) {
+                offset += n as u64;
+                continue;
+            }
+            if let Ok(v) = serde_json::from_slice::<Value>(&raw) {
+                if let Some(it) = history_item(&v, offset) {
+                    let k = j::s(&it, "kind");
+                    let subtype = it.get("subtype").and_then(Value::as_str).unwrap_or(k);
+                    let default_label;
+                    let label = match it.get("label").and_then(Value::as_str) {
+                        Some(l) => l,
+                        None => {
+                            default_label = j::label(k, "Claude");
+                            &default_label
+                        }
+                    };
+                    let entry = EntryRef {
+                        key: j::s(&it, "key"),
+                        kind: k,
+                        subtype,
+                        label,
+                        ts: j::s(&it, "ts"),
+                        text: j::s(&it, "text"),
+                    };
+                    if !f(entry) {
+                        break;
+                    }
                 }
             }
+            offset += n as u64;
+        }
+        Ok(())
+    }
+    fn read_entry_text(&self, cid: &str, key: &str) -> Result<Option<String>> {
+        let path = self.session(cid)?;
+        if let Some(off_str) = key.strip_prefix('b') {
+            if let Ok(offset) = off_str.parse::<u64>() {
+                let line = j::read_at(&path, offset)?;
+                let v = line.obj()?;
+                if let Some(mut it) = history_item(&v, offset) {
+                    if let Some(Value::String(text)) =
+                        it.as_object_mut().and_then(|m| m.remove("text"))
+                    {
+                        return Ok(Some(text));
+                    }
+                }
+                return Ok(None);
+            }
+        }
+        let mut reader = BufReader::with_capacity(256 * 1024, File::open(&path)?);
+        let mut raw = Vec::new();
+        let mut offset = 0u64;
+        loop {
+            raw.clear();
+            let n = reader.read_until(b'\n', &mut raw)?;
+            if n == 0 {
+                break;
+            }
+            if contains_bytes(&raw, key.as_bytes()) {
+                if let Ok(v) = serde_json::from_slice::<Value>(&raw) {
+                    if j::s(&v, "uuid") == key {
+                        if let Some(mut it) = history_item(&v, offset) {
+                            if let Some(Value::String(text)) =
+                                it.as_object_mut().and_then(|m| m.remove("text"))
+                            {
+                                return Ok(Some(text));
+                            }
+                        }
+                        return Ok(None);
+                    }
+                }
+            }
+            offset += n as u64;
+        }
+        Ok(None)
+    }
+    fn probe_lock(&self, cid: Option<&str>) -> Result<Option<String>> {
+        if let Some(cid) = cid {
             if let Ok(p) = self.session(cid) {
                 if j::LockedFile::open(&p, false).is_err() {
                     return Ok(Some(
@@ -1068,6 +1695,11 @@ impl Provider for ClaudeProvider {
             }
         }
         Ok(None)
+    }
+    fn content_signature(&self, cid: &str) -> Option<String> {
+        self.session(cid)
+            .ok()
+            .and_then(|p| j::content_signature(&p))
     }
     fn call(&self, op: &str, data: &Value, ctx: &OpContext) -> Result<Value> {
         match op {
@@ -1091,7 +1723,12 @@ impl Provider for ClaudeProvider {
                     json!({"id":"claude","name":"Claude","short":"CL","available":avail,"writable":avail,"blocked":false,"running":running,"test":self.test_mode(),"appdata":self.paths.root,"backups_root":self.paths.backup_root,"note":note}),
                 )
             }
-            "convs" => Ok(json!(self.list()?)),
+            "convs" => {
+                if data["refresh"].as_bool().unwrap_or(false) {
+                    self.invalidate_paths(None);
+                }
+                Ok(json!(self.list()?))
+            }
             "entries" => self.entries(data),
             "edit_preview" => self.edit_preview(data),
             "preview_cut" => self.preview_cut(data),
@@ -1137,13 +1774,108 @@ fn system_notice_types() -> Value {
 
 pub(crate) fn is_classifier_text(text: &str) -> bool {
     let prefix = SAFETY_CLASSIFIER_PREFIX.trim_end_matches('.');
-    text.trim_start().strip_prefix(prefix).is_some_and(|rest| {
+    let mut trimmed = text.trim_start();
+    if let Some(rest) = trimmed.strip_prefix("<system-reminder>") {
+        trimmed = rest.trim_start();
+    }
+    trimmed.strip_prefix(prefix).is_some_and(|rest| {
         rest.is_empty()
-            || rest
-                .chars()
-                .next()
-                .is_some_and(|c| c == '.' || c == ':' || c.is_whitespace())
+            || rest.chars().next().is_some_and(|c| {
+                matches!(c, '.' | ':' | '-' | '\u{2014}' | '\u{2013}') || c.is_whitespace()
+            })
     })
+}
+
+fn is_human_origin(v: &Value) -> bool {
+    j::s(&v["origin"], "kind") == "human" || j::s(v, "turnOrigin") == "human"
+}
+
+fn user_content_plain_text(c: &Value) -> String {
+    if let Some(s) = c.as_str() {
+        return s.to_owned();
+    }
+    if let Some(arr) = c.as_array() {
+        let mut out = Vec::new();
+        for b in arr {
+            if j::s(b, "type") == "text" {
+                let t = j::s(b, "text");
+                if !t.is_empty() {
+                    out.push(t);
+                }
+            }
+        }
+        return out.join("\n\n");
+    }
+    String::new()
+}
+
+fn is_local_command_text(text: &str) -> bool {
+    let trimmed = text.trim_start();
+    [
+        "<local-command-caveat>",
+        "<command-name>",
+        "<local-command-stdout>",
+        "<local-command-stderr>",
+    ]
+    .iter()
+    .any(|p| trimmed.starts_with(p))
+}
+
+fn is_user_tool_result(v: &Value) -> bool {
+    v["message"]["content"]
+        .as_array()
+        .is_some_and(|a| a.iter().any(|b| j::s(b, "type") == "tool_result"))
+}
+
+fn is_user_safeguard_meta(v: &Value) -> bool {
+    if j::s(v, "type") != "user" || is_user_tool_result(v) {
+        return false;
+    }
+    if !j::s(v, "refusedMessageId").is_empty() || v["ownNote"] == true {
+        return true;
+    }
+    !is_human_origin(v) && classifier_content(&v["message"]["content"]).is_some()
+}
+
+fn is_user_compact_summary(v: &Value) -> bool {
+    j::s(v, "type") == "user"
+        && !is_user_tool_result(v)
+        && (v["isCompactSummary"] == true || v["isVisibleInTranscriptOnly"] == true)
+}
+
+fn is_user_peer_message(v: &Value) -> bool {
+    j::s(v, "type") == "user"
+        && !is_user_tool_result(v)
+        && (j::s(&v["origin"], "kind") == "peer"
+            || j::s(v, "turnOrigin") == "peer"
+            || j::s(v, "promptSource") == "system")
+}
+
+fn is_user_local_command(v: &Value) -> bool {
+    j::s(v, "type") == "user"
+        && !is_user_tool_result(v)
+        && (is_local_command_text(&user_content_plain_text(&v["message"]["content"]))
+            || j::s(v, "rowSource") == "harness")
+}
+
+fn is_user_meta_record(v: &Value) -> bool {
+    j::s(v, "type") == "user"
+        && !is_user_tool_result(v)
+        && (v["isMeta"] == true || v["turnCompanion"] == true)
+}
+
+fn system_text_raw(v: &Value) -> String {
+    if !v["content"].is_null() {
+        j::text(&v["content"])
+    } else if let Some(s) = v["message"].as_str() {
+        s.to_owned()
+    } else if !v["message"]["content"].is_null() {
+        j::text(&v["message"]["content"])
+    } else if !v["message"].is_null() {
+        j::text(&v["message"])
+    } else {
+        String::new()
+    }
 }
 
 fn classifier_content(content: &Value) -> Option<String> {
@@ -1170,9 +1902,7 @@ fn classifier_content(content: &Value) -> Option<String> {
 
 fn system_notice_type(value: &Value) -> Option<&'static str> {
     match j::s(value, "type") {
-        "user" => classifier_content(&value["message"]["content"])
-            .is_some()
-            .then_some("safety_classifier"),
+        "user" => is_user_safeguard_meta(value).then_some("safety_classifier"),
         "system" => {
             let subtype = j::s(value, "subtype");
             if !matches!(
@@ -1181,15 +1911,12 @@ fn system_notice_type(value: &Value) -> Option<&'static str> {
             ) {
                 return None;
             }
-            let text = value["content"]
-                .as_str()
-                .or_else(|| value["message"].as_str())
-                .or_else(|| value["message"]["content"].as_str())?;
+            let text = system_text_raw(value);
             if text.trim().is_empty() {
                 return None;
             }
-            if is_classifier_text(text)
-                && (j::s(value, "level") == "warning" || subtype == "safeguard")
+            if subtype == "safeguard"
+                || (is_classifier_text(&text) && j::s(value, "level") == "warning")
             {
                 return Some("safety_classifier");
             }
@@ -1299,7 +2026,15 @@ fn extract_title(path: &Path) -> (String, String) {
             if cwd.is_empty() {
                 cwd = j::s(&v, "cwd").into();
             }
-            if title.is_empty() && j::s(&v, "type") == "user" {
+            if title.is_empty()
+                && j::s(&v, "type") == "user"
+                && !is_user_tool_result(&v)
+                && !is_user_safeguard_meta(&v)
+                && !is_user_compact_summary(&v)
+                && !is_user_local_command(&v)
+                && !is_user_peer_message(&v)
+                && !is_user_meta_record(&v)
+            {
                 let content = &v["message"]["content"];
                 let txt = if let Some(t) = content.as_str() {
                     t.to_string()
@@ -1372,7 +2107,7 @@ fn clean_human(c: &Value) -> (String, Option<String>) {
     }
 }
 pub fn history_item(v: &Value, offset: u64) -> Option<Value> {
-    let mut base = json!({"key":format!("b{offset}"),"uuid":v["uuid"],"parent_uuid":v["parentUuid"],"offset":offset,"ts":v.get("timestamp").cloned().unwrap_or(json!(""))});
+    let base = json!({"key":format!("b{offset}"),"uuid":v["uuid"],"parent_uuid":v["parentUuid"],"offset":offset,"ts":v.get("timestamp").cloned().unwrap_or(json!(""))});
     let typ = j::s(v, "type");
     let c = &v["message"]["content"];
     let extra = match typ {
@@ -1406,23 +2141,20 @@ pub fn history_item(v: &Value, offset: u64) -> Option<Value> {
                     }
                 }
                 json!({"kind":"tool","subtype":"tool_result","label":if tool.is_empty(){"Результат инструмента".into()}else{format!("Вывод ({tool})")},"tool":if tool.is_empty(){"tool_result".into()}else{tool},"text":texts.join("\n"),"status":if error{"error"}else{"ok"}})
+            } else if is_user_safeguard_meta(v) {
+                let text = classifier_content(c).unwrap_or_else(|| user_content_plain_text(c));
+                json!({"kind":"system","subtype":"safeguard","notice_type":"safety_classifier","level":"warning","label":"Уведомление безопасности (Safety Classifier)","text":text})
+            } else if is_user_compact_summary(v) {
+                json!({"kind":"compact","subtype":"compact_summary","label":"Компакция (сводка)","text":user_content_plain_text(c)})
+            } else if is_user_local_command(v) {
+                json!({"kind":"system","subtype":"command","label":"Локальная команда","text":user_content_plain_text(c)})
+            } else if is_user_peer_message(v) {
+                json!({"kind":"system","subtype":"notice","label":"Сообщение агента (Peer)","text":user_content_plain_text(c)})
+            } else if is_user_meta_record(v) {
+                json!({"kind":"system","subtype":"notice","label":"Системная заметка (Meta)","text":user_content_plain_text(c)})
             } else {
-                let raw = c.as_str().unwrap_or("");
-                if let Some(text) = classifier_content(c) {
-                    json!({"kind":"system","subtype":"safeguard","notice_type":"safety_classifier","level":"warning","label":"Уведомление безопасности (Safety Classifier)","text":text})
-                } else if [
-                    "<local-command-caveat>",
-                    "<command-name>",
-                    "<local-command-stdout>",
-                ]
-                .iter()
-                .any(|p| raw.starts_with(p))
-                {
-                    json!({"kind":"system","subtype":"command","label":"Локальная команда","text":raw})
-                } else {
-                    let (h, r) = clean_human(c);
-                    json!({"kind":"user","subtype":"prompt","label":"Вы","text":h,"reminder":r})
-                }
+                let (h, r) = clean_human(c);
+                json!({"kind":"user","subtype":"prompt","label":"Вы","text":h,"reminder":r})
             }
         }
         "assistant" => {
@@ -1462,14 +2194,13 @@ pub fn history_item(v: &Value, offset: u64) -> Option<Value> {
             }
         }
         "system" => {
-            let raw = if !v["content"].is_null() {
-                j::text(&v["content"])
-            } else {
-                j::text(&v["message"])
-            };
+            let raw = system_text_raw(v);
             if j::s(v, "subtype") == "compact_boundary" {
                 json!({"kind":"compact","subtype":"compact_boundary","label":"Компакция","text":if raw.is_empty(){"Conversation compacted"}else{&raw}})
             } else {
+                if raw.trim().is_empty() {
+                    return None;
+                }
                 let notice_type = system_notice_type(v);
                 let level = notice_type.map(|kind| {
                     if kind == "safety_classifier" {
@@ -1507,11 +2238,23 @@ pub fn history_item(v: &Value, offset: u64) -> Option<Value> {
         }
         _ => return None,
     };
-    base.as_object_mut()?.extend(extra.as_object()?.clone());
-    Some(base)
+    if let (Value::Object(mut base_map), Value::Object(extra_map)) = (base, extra) {
+        base_map.extend(extra_map);
+        Some(Value::Object(base_map))
+    } else {
+        None
+    }
 }
 fn entry(it: Value, writable: bool) -> Value {
-    let k = j::s(&it, "kind");
+    let mut map = match it {
+        Value::Object(m) => m,
+        _ => return Value::Null,
+    };
+    let k = map
+        .get("kind")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_owned();
     let mut actions = Vec::new();
     if writable {
         actions.extend(["edit", "del_single"]);
@@ -1520,13 +2263,203 @@ fn entry(it: Value, writable: bool) -> Value {
         }
         actions.push("cut_tail");
     }
-    let mut result = json!({"key":it["key"],"uuid":it["uuid"],"kind":k,"subtype":it.get("subtype").cloned().unwrap_or(json!(k)),"label":it.get("label").cloned().unwrap_or(json!(j::label(k,"Claude"))),"text":it.get("text").cloned().unwrap_or(json!("")),"ts":it["ts"],"tool":it["tool"],"status":it["status"],"in_db":true,"actions":actions});
+    let key = map.remove("key").unwrap_or(Value::Null);
+    let uuid = map.remove("uuid").unwrap_or(Value::Null);
+    let subtype = map.remove("subtype").unwrap_or_else(|| json!(k));
+    let label = map
+        .remove("label")
+        .unwrap_or_else(|| json!(j::label(&k, "Claude")));
+    let text = map.remove("text").unwrap_or_else(|| json!(""));
+    let ts = map.remove("ts").unwrap_or(Value::Null);
+    let tool = map.remove("tool").unwrap_or(Value::Null);
+    let status = map.remove("status").unwrap_or(Value::Null);
+    let mut out = serde_json::Map::with_capacity(13);
+    out.insert("key".into(), key);
+    out.insert("uuid".into(), uuid);
+    out.insert("kind".into(), Value::String(k));
+    out.insert("subtype".into(), subtype);
+    out.insert("label".into(), label);
+    out.insert("text".into(), text);
+    out.insert("ts".into(), ts);
+    out.insert("tool".into(), tool);
+    out.insert("status".into(), status);
+    out.insert("in_db".into(), Value::Bool(true));
+    out.insert("actions".into(), json!(actions));
     for field in ["notice_type", "level"] {
-        if let Some(value) = it.get(field).filter(|value| !value.is_null()) {
-            result[field] = value.clone();
+        if let Some(value) = map.remove(field).filter(|v| !v.is_null()) {
+            out.insert(field.into(), value);
         }
     }
-    result
+    Value::Object(out)
+}
+fn contains_bytes(hay: &[u8], needle: &[u8]) -> bool {
+    if needle.is_empty() || needle.len() > hay.len() {
+        return false;
+    }
+    let first = needle[0];
+    let rest = &needle[1..];
+    let limit = hay.len() - rest.len();
+    let mut i = 0usize;
+    while i < limit {
+        if let Some(pos) = hay[i..limit].iter().position(|&b| b == first) {
+            let start = i + pos;
+            if &hay[start + 1..start + needle.len()] == rest {
+                return true;
+            }
+            i = start + 1;
+        } else {
+            break;
+        }
+    }
+    false
+}
+fn claude_raw_may_be_entry(raw: &[u8]) -> bool {
+    contains_bytes(raw, b"\"type\":\"user\"")
+        || contains_bytes(raw, b"\"type\": \"user\"")
+        || contains_bytes(raw, b"\"type\":\"assistant\"")
+        || contains_bytes(raw, b"\"type\": \"assistant\"")
+        || contains_bytes(raw, b"\"type\":\"system\"")
+        || contains_bytes(raw, b"\"type\": \"system\"")
+}
+#[derive(serde::Deserialize)]
+struct ClaudeBlockProbe<'a> {
+    #[serde(rename = "type", borrow)]
+    typ: Option<Cow<'a, str>>,
+}
+enum ClaudeContentKind {
+    Str,
+    Blocks {
+        has_tool_result: bool,
+        first_assistant_is_text: bool,
+    },
+    Other,
+}
+impl<'de> Deserialize<'de> for ClaudeContentKind {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+        struct ContentVisitor;
+        impl<'de> Visitor<'de> for ContentVisitor {
+            type Value = ClaudeContentKind;
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("string or content blocks")
+            }
+            fn visit_str<E: serde::de::Error>(
+                self,
+                _v: &str,
+            ) -> std::result::Result<Self::Value, E> {
+                Ok(ClaudeContentKind::Str)
+            }
+            fn visit_borrowed_str<E: serde::de::Error>(
+                self,
+                _v: &'de str,
+            ) -> std::result::Result<Self::Value, E> {
+                Ok(ClaudeContentKind::Str)
+            }
+            fn visit_seq<A: SeqAccess<'de>>(
+                self,
+                mut seq: A,
+            ) -> std::result::Result<Self::Value, A::Error> {
+                let mut has_tool_result = false;
+                let mut first_block: Option<bool> = None;
+                while let Some(block) = seq.next_element::<ClaudeBlockProbe<'de>>()? {
+                    match block.typ.as_deref() {
+                        Some("tool_result") => has_tool_result = true,
+                        Some("text") => {
+                            if first_block.is_none() {
+                                first_block = Some(true);
+                            }
+                        }
+                        Some("thinking" | "tool_use") => {
+                            if first_block.is_none() {
+                                first_block = Some(false);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                Ok(ClaudeContentKind::Blocks {
+                    has_tool_result,
+                    first_assistant_is_text: first_block.unwrap_or(false),
+                })
+            }
+            fn visit_map<A: MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> std::result::Result<Self::Value, A::Error> {
+                while map.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
+                Ok(ClaudeContentKind::Other)
+            }
+            fn visit_unit<E: serde::de::Error>(self) -> std::result::Result<Self::Value, E> {
+                Ok(ClaudeContentKind::Other)
+            }
+            fn visit_none<E: serde::de::Error>(self) -> std::result::Result<Self::Value, E> {
+                Ok(ClaudeContentKind::Other)
+            }
+            fn visit_bool<E: serde::de::Error>(
+                self,
+                _v: bool,
+            ) -> std::result::Result<Self::Value, E> {
+                Ok(ClaudeContentKind::Other)
+            }
+            fn visit_i64<E: serde::de::Error>(
+                self,
+                _v: i64,
+            ) -> std::result::Result<Self::Value, E> {
+                Ok(ClaudeContentKind::Other)
+            }
+            fn visit_u64<E: serde::de::Error>(
+                self,
+                _v: u64,
+            ) -> std::result::Result<Self::Value, E> {
+                Ok(ClaudeContentKind::Other)
+            }
+            fn visit_f64<E: serde::de::Error>(
+                self,
+                _v: f64,
+            ) -> std::result::Result<Self::Value, E> {
+                Ok(ClaudeContentKind::Other)
+            }
+        }
+        deserializer.deserialize_any(ContentVisitor)
+    }
+}
+#[derive(serde::Deserialize)]
+struct ClaudeMessageProbe {
+    content: Option<ClaudeContentKind>,
+}
+#[derive(serde::Deserialize)]
+struct ClaudeKindProbe<'a> {
+    #[serde(rename = "type", borrow)]
+    typ: Option<Cow<'a, str>>,
+    message: Option<ClaudeMessageProbe>,
+}
+fn claude_raw_may_be_dialogue(raw: &[u8]) -> bool {
+    if !contains_bytes(raw, b"\"text\"") && !contains_bytes(raw, b"\"user\"") {
+        return false;
+    }
+    if raw.len() < 1024 {
+        return true;
+    }
+    let Ok(probe) = serde_json::from_slice::<ClaudeKindProbe>(raw) else {
+        return false;
+    };
+    match probe.typ.as_deref() {
+        Some("user") => match probe.message.and_then(|m| m.content) {
+            Some(ClaudeContentKind::Blocks {
+                has_tool_result: true,
+                ..
+            }) => false,
+            _ => true,
+        },
+        Some("assistant") => matches!(
+            probe.message.and_then(|m| m.content),
+            Some(ClaudeContentKind::Str)
+                | Some(ClaudeContentKind::Blocks {
+                    first_assistant_is_text: true,
+                    ..
+                })
+        ),
+        _ => false,
+    }
 }
 fn edit_info(v: &Value) -> (String, String) {
     let typ = j::s(v, "type");
@@ -1536,7 +2469,13 @@ fn edit_info(v: &Value) -> (String, String) {
         &v["content"]
     };
     if typ == "system" {
-        return (j::text(c), "Системное уведомление".into());
+        let text = system_text_raw(v);
+        let label = if system_notice_type(v) == Some("safety_classifier") {
+            "Уведомление безопасности (Safeguard)"
+        } else {
+            "Системное уведомление"
+        };
+        return (text, label.into());
     }
     if typ == "user" {
         if let Some(a) = c.as_array() {
@@ -1559,16 +2498,38 @@ fn edit_info(v: &Value) -> (String, String) {
                     return (text, "Вывод инструмента (tool_result)".into());
                 }
             }
+        }
+        if is_user_safeguard_meta(v) {
+            return (
+                user_content_plain_text(c),
+                "Уведомление безопасности (Safeguard)".into(),
+            );
+        }
+        if is_user_compact_summary(v) {
+            return (user_content_plain_text(c), "Компакция (сводка)".into());
+        }
+        if is_user_local_command(v) {
+            return (
+                user_content_plain_text(c),
+                "Системная команда / контекст".into(),
+            );
+        }
+        if is_user_peer_message(v) {
+            return (user_content_plain_text(c), "Сообщение агента (Peer)".into());
+        }
+        if is_user_meta_record(v) {
+            return (
+                user_content_plain_text(c),
+                "Системная заметка (Meta)".into(),
+            );
+        }
+        if c.is_array() {
             return (clean_human(c).0, "Сообщение пользователя".into());
         }
         if let Some(t) = c.as_str() {
             return (
                 t.into(),
-                if t.contains("stopped by a safety classifier")
-                    || t.starts_with("Your response above")
-                {
-                    "Уведомление безопасности (Safeguard)"
-                } else if t.starts_with("<local-command-") || t.starts_with("<system-reminder>") {
+                if t.starts_with("<system-reminder>") {
                     "Системная команда / контекст"
                 } else {
                     "Сообщение пользователя"
@@ -1609,13 +2570,39 @@ fn edit_info(v: &Value) -> (String, String) {
 fn set_text(v: &mut Value, text: &str) -> Result<()> {
     let typ = j::s(v, "type").to_string();
     if typ == "system" {
-        v["content"] = json!(text);
+        if v.get("content").is_some_and(|c| !c.is_null()) {
+            v["content"] = json!(text);
+        } else if v.get("message").is_some_and(Value::is_string) {
+            v["message"] = json!(text);
+        } else if v
+            .get("message")
+            .and_then(|m| m.get("content"))
+            .is_some_and(|c| !c.is_null())
+        {
+            v["message"]["content"] = json!(text);
+        } else {
+            v["content"] = json!(text);
+        }
         return Ok(());
     }
     if !matches!(typ.as_str(), "user" | "assistant") || !v["message"].is_object() {
         bail!("Ключ не указывает на редактируемое сообщение Claude.");
     }
+    let preserve_as_meta = typ == "user"
+        && (is_user_safeguard_meta(v)
+            || is_user_local_command(v)
+            || is_user_peer_message(v)
+            || is_user_meta_record(v));
+    let preserve_as_safeguard = typ == "user" && is_user_safeguard_meta(v);
+    if preserve_as_meta {
+        v["isMeta"] = json!(true);
+    }
     if let Some(a) = v["message"]["content"].as_array_mut() {
+        if preserve_as_safeguard && !a.is_empty() && a.iter().all(|b| j::s(b, "type") == "text") {
+            a[0]["text"] = json!(text);
+            a.truncate(1);
+            return Ok(());
+        }
         for b in a.iter_mut() {
             match (typ.as_str(), j::s(b, "type")) {
                 ("user", "tool_result") => {

@@ -365,6 +365,20 @@ fn open_in_file_manager(path: &Path, is_file: bool) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn pick_folder(app: tauri::AppHandle) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let folder = app.dialog().file().blocking_pick_folder();
+        let Some(folder) = folder else {
+            return Ok(serde_json::json!({"cancelled":true}));
+        };
+        let path = folder.into_path().map_err(error)?;
+        Ok(serde_json::json!({"cancelled":false,"path":path}))
+    })
+    .await
+    .map_err(error)?
+}
+
+#[tauri::command]
 async fn reveal_path(path: String) -> Result<Value, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let target = normalize_reveal_path(&path);
@@ -436,6 +450,7 @@ fn main() {
             export_batch,
             inspect_pack,
             import_pack,
+            pick_folder,
             reveal_path
         ])
         .build(tauri::generate_context!())

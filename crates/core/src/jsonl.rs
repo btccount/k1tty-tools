@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
     fs::{self, File, OpenOptions},
-    io::{BufRead, BufReader, Read, Seek, SeekFrom, Write},
+    io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write},
     path::{Component, Path, PathBuf},
     time::UNIX_EPOCH,
 };
@@ -43,7 +43,7 @@ pub fn sha(bytes: &[u8]) -> String {
 pub fn hash_file(path: &Path) -> Result<String> {
     let mut f = File::open(path)?;
     let mut h = Sha256::new();
-    let mut b = [0u8; 65536];
+    let mut b = vec![0u8; 256 * 1024];
     loop {
         let n = f.read(&mut b)?;
         if n == 0 {
@@ -52,6 +52,56 @@ pub fn hash_file(path: &Path) -> Result<String> {
         h.update(&b[..n]);
     }
     Ok(format!("{:x}", h.finalize()))
+}
+pub fn fast_revision(path: &Path) -> Result<String> {
+    let meta = fs::metadata(path)?;
+    let len = meta.len();
+    if len <= 2 * 1024 * 1024 {
+        return hash_file(path);
+    }
+    let nanos = meta
+        .modified()?
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let mut f = File::open(path)?;
+    let mut h = Sha256::new();
+    h.update(len.to_le_bytes());
+    h.update(nanos.to_le_bytes());
+    let mut head = [0u8; 4096];
+    let mut head_len = 0usize;
+    while head_len < head.len() {
+        let n = f.read(&mut head[head_len..])?;
+        if n == 0 {
+            break;
+        }
+        head_len += n;
+    }
+    h.update(&head[..head_len]);
+    let tail_start = len.saturating_sub(4096);
+    f.seek(SeekFrom::Start(tail_start))?;
+    let mut tail = [0u8; 4096];
+    let mut tail_len = 0usize;
+    while tail_len < tail.len() {
+        let n = f.read(&mut tail[tail_len..])?;
+        if n == 0 {
+            break;
+        }
+        tail_len += n;
+    }
+    h.update(&tail[..tail_len]);
+    Ok(format!("{:x}", h.finalize()))
+}
+pub fn content_signature(path: &Path) -> Option<String> {
+    let meta = fs::metadata(path).ok()?;
+    let len = meta.len();
+    let nanos = meta
+        .modified()
+        .ok()?
+        .duration_since(UNIX_EPOCH)
+        .ok()?
+        .as_nanos();
+    Some(format!("{len}:{nanos}"))
 }
 pub fn load_json(path: &Path) -> Result<Value> {
     serde_json::from_reader(File::open(path)?)
@@ -151,17 +201,42 @@ pub fn safe_join(root: &Path, rel: &str) -> Result<PathBuf> {
     }
     Ok(dest)
 }
-pub fn copy_checked(src: &Path, dst: &Path) -> Result<String> {
+pub fn copy_checked_with_stats(src: &Path, dst: &Path) -> Result<(String, usize, u64)> {
     if let Some(p) = dst.parent() {
         fs::create_dir_all(p)?;
     }
-    let h = hash_file(src)?;
-    fs::copy(src, dst)?;
-    OpenOptions::new().write(true).open(dst)?.sync_all()?;
-    if hash_file(dst)? != h {
-        bail!("Контрольная сумма резервной копии не совпадает.")
+    let mut reader = File::open(src)?;
+    let out = File::create(dst)?;
+    let mut writer = BufWriter::with_capacity(256 * 1024, out);
+    let mut h = Sha256::new();
+    let mut buf = vec![0u8; 256 * 1024];
+    let mut lines = 0usize;
+    let mut total_bytes = 0u64;
+    let mut last_byte = None;
+    loop {
+        let n = reader.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        let chunk = &buf[..n];
+        h.update(chunk);
+        lines += chunk.iter().filter(|&&b| b == b'\n').count();
+        total_bytes += n as u64;
+        last_byte = Some(chunk[n - 1]);
+        writer.write_all(chunk)?;
     }
-    Ok(h)
+    if total_bytes > 0 && last_byte != Some(b'\n') {
+        lines += 1;
+    }
+    writer.flush()?;
+    writer
+        .into_inner()
+        .map_err(|e| e.into_error())?
+        .sync_all()?;
+    Ok((format!("{:x}", h.finalize()), lines, total_bytes))
+}
+pub fn copy_checked(src: &Path, dst: &Path) -> Result<String> {
+    Ok(copy_checked_with_stats(src, dst)?.0)
 }
 
 pub struct LockedFile {
@@ -226,7 +301,17 @@ impl LockedFile {
     pub fn replace_from(&mut self, src: &Path) -> Result<()> {
         let mut f = File::open(src)?;
         self.file.seek(SeekFrom::Start(0))?;
-        let len = std::io::copy(&mut f, &mut self.file)?;
+        let mut buf = vec![0u8; 256 * 1024];
+        let mut len = 0u64;
+        loop {
+            let n = f.read(&mut buf)?;
+            if n == 0 {
+                break;
+            }
+            self.file.write_all(&buf[..n])?;
+            len += n as u64;
+        }
+        self.file.flush()?;
         self.file.set_len(len)?;
         self.file.sync_all()?;
         Ok(())
@@ -235,6 +320,64 @@ impl LockedFile {
         self.file.seek(SeekFrom::Start(0))?;
         self.file.write_all(bytes)?;
         self.file.set_len(bytes.len() as u64)?;
+        self.file.sync_all()?;
+        Ok(())
+    }
+    pub fn replace_tail(
+        &mut self,
+        offset: u64,
+        replacement_line: &[u8],
+        old_line_len: usize,
+    ) -> Result<()> {
+        if replacement_line.len() == old_line_len {
+            self.file.seek(SeekFrom::Start(offset))?;
+            self.file.write_all(replacement_line)?;
+            self.file.flush()?;
+            self.file.sync_all()?;
+            return Ok(());
+        }
+        let tail_start = offset + old_line_len as u64;
+        let file_len = self.file.metadata()?.len();
+        if tail_start >= file_len {
+            self.file.seek(SeekFrom::Start(offset))?;
+            self.file.write_all(replacement_line)?;
+            self.file.flush()?;
+            self.file.set_len(offset + replacement_line.len() as u64)?;
+            self.file.sync_all()?;
+            return Ok(());
+        }
+        let mut tmp = tempfile::tempfile()?;
+        let mut buf = vec![0u8; 256 * 1024];
+        self.file.seek(SeekFrom::Start(tail_start))?;
+        let mut tail_len = 0u64;
+        loop {
+            let n = self.file.read(&mut buf)?;
+            if n == 0 {
+                break;
+            }
+            tmp.write_all(&buf[..n])?;
+            tail_len += n as u64;
+        }
+        tmp.flush()?;
+        tmp.seek(SeekFrom::Start(0))?;
+        self.file.seek(SeekFrom::Start(offset))?;
+        self.file.write_all(replacement_line)?;
+        loop {
+            let n = tmp.read(&mut buf)?;
+            if n == 0 {
+                break;
+            }
+            self.file.write_all(&buf[..n])?;
+        }
+        self.file.flush()?;
+        self.file
+            .set_len(offset + replacement_line.len() as u64 + tail_len)?;
+        self.file.sync_all()?;
+        Ok(())
+    }
+    pub fn truncate_at(&mut self, offset: u64) -> Result<()> {
+        self.file.flush()?;
+        self.file.set_len(offset)?;
         self.file.sync_all()?;
         Ok(())
     }
@@ -278,7 +421,7 @@ pub fn ending(raw: &[u8]) -> &[u8] {
     }
 }
 pub fn read_lines(path: &Path) -> Result<Vec<Line>> {
-    let mut f = BufReader::new(File::open(path)?);
+    let mut f = BufReader::with_capacity(256 * 1024, File::open(path)?);
     let mut offset = 0;
     let mut out = Vec::new();
     loop {
@@ -293,11 +436,27 @@ pub fn read_lines(path: &Path) -> Result<Vec<Line>> {
     Ok(out)
 }
 pub fn write_lines(lines: &[Line]) -> Vec<u8> {
-    let mut out = Vec::new();
+    let total_len: usize = lines.iter().map(|l| l.raw.len()).sum();
+    let mut out = Vec::with_capacity(total_len);
     for l in lines {
         out.extend_from_slice(&l.raw);
     }
     out
+}
+struct CountWriter(usize);
+impl Write for CountWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0 += buf.len();
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+pub fn json_serialized_len(v: &Value) -> usize {
+    let mut counter = CountWriter(0);
+    let _ = serde_json::to_writer(&mut counter, v);
+    counter.0
 }
 pub fn read_at(path: &Path, offset: u64) -> Result<Line> {
     let mut f = File::open(path)?;
@@ -329,26 +488,47 @@ pub fn reverse_lines(
     if pos > size {
         bail!("Некорректный курсор истории.")
     };
+    const CHUNK_SIZE: usize = 256 * 1024;
+    let mut buf = vec![0u8; CHUNK_SIZE];
+    let mut scratch = Vec::<u8>::new();
     let mut fragments = Vec::<Vec<u8>>::new();
     while pos > 0 {
-        let n = pos.min(65536) as usize;
+        let n = pos.min(CHUNK_SIZE as u64) as usize;
         pos -= n as u64;
         f.seek(SeekFrom::Start(pos))?;
-        let mut chunk = vec![0; n];
-        f.read_exact(&mut chunk)?;
+        let chunk = &mut buf[..n];
+        f.read_exact(chunk)?;
         let mut e = n;
         loop {
             if let Some(nl) = chunk[..e].iter().rposition(|&c| c == b'\n') {
-                let mut line = chunk[nl + 1..e].to_vec();
-                for frag in fragments.drain(..).rev() {
-                    line.extend_from_slice(&frag)
-                }
-                if !line.is_empty() {
-                    if line.last() == Some(&b'\r') {
-                        line.pop();
+                if fragments.is_empty() {
+                    let mut slice = &chunk[nl + 1..e];
+                    if !slice.is_empty() {
+                        if slice.last() == Some(&b'\r') {
+                            slice = &slice[..slice.len() - 1];
+                        }
+                        if !callback(pos + nl as u64 + 1, slice)? {
+                            return Ok(());
+                        }
                     }
-                    if !callback(pos + nl as u64 + 1, &line)? {
-                        return Ok(());
+                } else {
+                    let tail = &chunk[nl + 1..e];
+                    let cap = tail.len() + fragments.iter().map(Vec::len).sum::<usize>();
+                    scratch.clear();
+                    if scratch.capacity() < cap {
+                        scratch.reserve(cap - scratch.capacity());
+                    }
+                    scratch.extend_from_slice(tail);
+                    for frag in fragments.drain(..).rev() {
+                        scratch.extend_from_slice(&frag);
+                    }
+                    if !scratch.is_empty() {
+                        if scratch.last() == Some(&b'\r') {
+                            scratch.pop();
+                        }
+                        if !callback(pos + nl as u64 + 1, &scratch)? {
+                            return Ok(());
+                        }
                     }
                 }
                 e = nl;
@@ -361,14 +541,18 @@ pub fn reverse_lines(
         }
     }
     if !fragments.is_empty() {
-        let mut line = Vec::new();
-        for f in fragments.into_iter().rev() {
-            line.extend(f);
+        let cap: usize = fragments.iter().map(Vec::len).sum();
+        scratch.clear();
+        if scratch.capacity() < cap {
+            scratch.reserve(cap - scratch.capacity());
         }
-        if line.last() == Some(&b'\r') {
-            line.pop();
+        for frag in fragments.into_iter().rev() {
+            scratch.extend_from_slice(&frag);
         }
-        let _ = callback(0, &line)?;
+        if scratch.last() == Some(&b'\r') {
+            scratch.pop();
+        }
+        let _ = callback(0, &scratch)?;
     }
     Ok(())
 }
@@ -450,6 +634,27 @@ pub fn strip_long_prefix(path: &str) -> String {
         path.strip_prefix("\\\\?\\").unwrap_or(path).to_string()
     }
 }
+fn contains_bytes(hay: &[u8], needle: &[u8]) -> bool {
+    if needle.is_empty() || needle.len() > hay.len() {
+        return false;
+    }
+    let first = needle[0];
+    let rest = &needle[1..];
+    let limit = hay.len() - rest.len();
+    let mut i = 0usize;
+    while i < limit {
+        if let Some(pos) = hay[i..limit].iter().position(|&b| b == first) {
+            let start = i + pos;
+            if &hay[start + 1..start + needle.len()] == rest {
+                return true;
+            }
+            i = start + 1;
+        } else {
+            break;
+        }
+    }
+    false
+}
 pub fn leak_check(targets: &[PathBuf], texts: &[String]) -> Value {
     let mut frags = Vec::new();
     for t in texts {
@@ -467,16 +672,46 @@ pub fn leak_check(targets: &[PathBuf], texts: &[String]) -> Value {
             break;
         }
     }
+    if frags.is_empty() {
+        return Value::Array(Vec::new());
+    }
+    let max_frag_bytes = frags.iter().map(|s| s.len()).max().unwrap_or(0);
+    let chunk_size = 256 * 1024;
+    let mut buf = vec![0u8; max_frag_bytes + chunk_size];
     let mut leaks = Vec::new();
     for p in targets {
-        if let Ok(raw) = fs::read_to_string(p) {
-            for f in &frags {
-                if raw.contains(f) {
-                    leaks.push(json!([
-                        p.file_name().unwrap_or_default().to_string_lossy(),
-                        f
-                    ]))
+        let Ok(mut f) = File::open(p) else {
+            continue;
+        };
+        let mut found = vec![false; frags.len()];
+        let mut carry = 0usize;
+        loop {
+            let Ok(n) = f.read(&mut buf[carry..carry + chunk_size]) else {
+                break;
+            };
+            if n == 0 {
+                break;
+            }
+            let total = carry + n;
+            let valid = &buf[..total];
+            for (idx, frag) in frags.iter().enumerate() {
+                if !found[idx] && contains_bytes(valid, frag.as_bytes()) {
+                    found[idx] = true;
                 }
+            }
+            if found.iter().all(|&x| x) {
+                break;
+            }
+            let next_carry = total.min(max_frag_bytes.saturating_sub(1));
+            buf.copy_within(total - next_carry..total, 0);
+            carry = next_carry;
+        }
+        for (idx, frag) in frags.iter().enumerate() {
+            if found[idx] {
+                leaks.push(json!([
+                    p.file_name().unwrap_or_default().to_string_lossy(),
+                    frag
+                ]));
             }
         }
     }

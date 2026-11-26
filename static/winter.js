@@ -100,6 +100,9 @@
   let fadeTimer = 0;
   let fadeRafId = 0;
   let resizeRafId = 0;
+  let scrollResumeTimer = 0;
+  let scrollPaused = false;
+  let windowBlurred = false;
   let prevTs = 0;
   let elapsed = 0;
   let pointerX = -9999;
@@ -107,7 +110,7 @@
   let pointerVx = 0;
   let lastPtrX = -9999;
 
-  function makeFlake(randomY) {
+  function initFlake(f, randomY) {
     const roll = Math.random();
     let layer = 0;
     let kind = "micro";
@@ -150,22 +153,21 @@
       rotSpeed = (Math.random() < 0.5 ? -1 : 1) * (0.14 + Math.random() * 0.26);
     }
 
-    return {
-      x: Math.random() * (w + 60) - 30,
-      y: randomY ? Math.random() * h : -(radius * 2 + Math.random() * 48),
-      layer,
-      kind,
-      r: radius,
-      vy: speedY,
-      vx: 0,
-      amp: driftAmp,
-      freq: 0.35 + Math.random() * 0.65,
-      phase: Math.random() * Math.PI * 2,
-      alpha,
-      twinkle: 0.4 + Math.random() * 0.9,
-      rot,
-      rotSpeed,
-    };
+    f.x = Math.random() * (w + 60) - 30;
+    f.y = randomY ? Math.random() * h : -(radius * 2 + Math.random() * 48);
+    f.layer = layer;
+    f.kind = kind;
+    f.r = radius;
+    f.vy = speedY;
+    f.vx = 0;
+    f.amp = driftAmp;
+    f.freq = 0.35 + Math.random() * 0.65;
+    f.phase = Math.random() * Math.PI * 2;
+    f.alpha = alpha;
+    f.twinkle = 0.4 + Math.random() * 0.9;
+    f.rot = rot;
+    f.rotSpeed = rotSpeed;
+    return f;
   }
 
   function targetCount() {
@@ -190,9 +192,9 @@
 
     const want = targetCount();
     if (flakes.length === 0) {
-      for (let i = 0; i < want; i++) flakes.push(makeFlake(true));
+      for (let i = 0; i < want; i++) flakes.push(initFlake({}, true));
     } else if (flakes.length < want) {
-      for (let i = flakes.length; i < want; i++) flakes.push(makeFlake(true));
+      for (let i = flakes.length; i < want; i++) flakes.push(initFlake({}, true));
     } else if (flakes.length > want) {
       flakes.length = want;
     }
@@ -203,6 +205,7 @@
     ctx.clearRect(0, 0, w, h);
     const wind = Math.sin(elapsed * 0.24) * 13 + Math.cos(elapsed * 0.09) * 7;
     pointerVx *= Math.pow(0.08, dt);
+    const drag = Math.pow(0.18, dt);
 
     for (let i = 0; i < flakes.length; i++) {
       const f = flakes[i];
@@ -222,13 +225,13 @@
           }
         }
 
-        f.vx *= Math.pow(0.18, dt);
+        f.vx *= drag;
         f.x += (layerWind + sway + f.vx) * dt;
         f.y += f.vy * dt;
         f.rot += f.rotSpeed * dt;
 
         if (f.y > h + f.r * 3) {
-          flakes[i] = makeFlake(false);
+          initFlake(f, false);
           continue;
         }
         if (f.x < -36) f.x = w + 30;
@@ -257,8 +260,12 @@
 
   function tick(ts) {
     rafId = 0;
-    if (!enabled || document.hidden || isReduced() || !ctx) return;
-    const dt = prevTs ? Math.min(0.05, Math.max(0.001, (ts - prevTs) / 1000)) : 0.016;
+    if (!enabled || document.hidden || isReduced() || windowBlurred || scrollPaused || !ctx) return;
+    if (prevTs && (ts - prevTs) < 32) {
+      rafId = requestAnimationFrame(tick);
+      return;
+    }
+    const dt = prevTs ? Math.min(0.06, Math.max(0.001, (ts - prevTs) / 1000)) : 0.033;
     prevTs = ts;
     elapsed += dt;
     renderFrame(dt);
@@ -266,7 +273,7 @@
   }
 
   function startLoop() {
-    if (!enabled || document.hidden || isReduced() || !ctx) return;
+    if (!enabled || document.hidden || isReduced() || windowBlurred || scrollPaused || !ctx) return;
     if (rafId) return;
     prevTs = 0;
     rafId = requestAnimationFrame(tick);
@@ -278,6 +285,8 @@
       rafId = 0;
     }
     if (resizeRafId) { cancelAnimationFrame(resizeRafId); resizeRafId = 0; }
+    if (scrollResumeTimer) { clearTimeout(scrollResumeTimer); scrollResumeTimer = 0; }
+    scrollPaused = false;
     prevTs = 0;
   }
 
@@ -302,7 +311,7 @@
         fadeRafId = 0;
         if (enabled && !document.hidden && !isReduced()) canvas.classList.add("visible");
       });
-      startLoop();
+      if (!windowBlurred) startLoop();
     } else {
       stopLoop();
       canvas.classList.remove("visible");
@@ -311,7 +320,6 @@
         fadeTimer = 0;
         if (!enabled || isReduced() || document.hidden) {
           canvas.classList.add("hidden");
-           
           canvas.width = canvas.height = 1;
         }
       }, 180);
@@ -320,7 +328,7 @@
   }
 
   window.addEventListener("pointermove", (ev) => {
-    if (!enabled || document.hidden || isReduced()) return;
+    if (!enabled || document.hidden || isReduced() || windowBlurred) return;
     if (lastPtrX > -1000) {
       pointerVx = Math.max(-180, Math.min(180, (ev.clientX - lastPtrX) * 6));
     }
@@ -335,6 +343,24 @@
     lastPtrX = -9999;
   }, { passive: true });
 
+  document.addEventListener("scroll", (ev) => {
+    if (!enabled || document.hidden || isReduced() || windowBlurred) return;
+    if (ev.target && ev.target.id === "feedScroll") {
+      scrollPaused = true;
+      if (rafId) {
+        cancelAnimationFrame(rafId);
+        rafId = 0;
+      }
+      prevTs = 0;
+      if (scrollResumeTimer) clearTimeout(scrollResumeTimer);
+      scrollResumeTimer = setTimeout(() => {
+        scrollResumeTimer = 0;
+        scrollPaused = false;
+        startLoop();
+      }, 180);
+    }
+  }, { capture: true, passive: true });
+
   window.addEventListener("resize", () => {
     if (!enabled || document.hidden || isReduced() || resizeRafId) return;
     resizeRafId = requestAnimationFrame(() => {
@@ -343,11 +369,25 @@
     });
   }, { passive: true });
 
+  window.addEventListener("blur", () => {
+    windowBlurred = true;
+    stopLoop();
+  });
+
+  window.addEventListener("focus", () => {
+    if (!windowBlurred) return;
+    windowBlurred = false;
+    if (enabled && !document.hidden && !isReduced()) {
+      syncSize();
+      startLoop();
+    }
+  });
+
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
       stopLoop();
       if (fadeRafId) { cancelAnimationFrame(fadeRafId); fadeRafId = 0; }
-    } else if (enabled && !isReduced()) {
+    } else if (enabled && !isReduced() && !windowBlurred) {
       syncSize();
       canvas.classList.remove("hidden");
       if (!isReduced()) canvas.classList.add("visible");

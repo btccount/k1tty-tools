@@ -2,10 +2,13 @@
 
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => Array.from(root.querySelectorAll(s));
+const ESC_MAP = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+const ESC_HAS = /[&<>"']/;
+const ESC_ALL = /[&<>"']/g;
 const esc = (s) => {
-  const d = document.createElement("div");
-  d.textContent = s ?? "";
-  return d.innerHTML;
+  if (s == null) return "";
+  const str = String(s);
+  return ESC_HAS.test(str) ? str.replace(ESC_ALL, (ch) => ESC_MAP[ch]) : str;
 };
 
 function ico(name, cls = "") {
@@ -203,6 +206,9 @@ const I18N = {
     empty: "Пусто",
     transcript_only: "только в транскрипте",
     show_more: "Показать полностью",
+    expand_full_btn: "Показать полностью ({size})",
+    loading_full_btn: "Загрузка...",
+    truncated_notice: "Показано начало большого сообщения",
     collapse: "Свернуть",
     copy: "Копировать",
     copied: "Скопировано",
@@ -240,6 +246,7 @@ const I18N = {
     prev_match: "Предыдущее совпадение",
     next_match: "Следующее совпадение",
     find_no_matches: "Нет совпадений",
+    find_whole_word: "Точное слово",
     slim_tip: "Очистить thinking и тяжелые шаги",
     slim_title: "Оптимизация контекста",
     slim_opt_thinking: "Удалить размышления (thinking)",
@@ -270,6 +277,106 @@ const I18N = {
     palette_toggle_select: "Режим выбора нескольких чатов",
     palette_toggle_privacy: "Переключить режим приватности",
     palette_open_slim: "Оптимизация контекста и thinking",
+    palette_open_generate: "Сгенерировать диалог",
+    gen_title: "Сгенерировать диалог",
+    gen_btn_open: "Сгенерировать диалог",
+    gen_step_setup: "Настройка",
+    gen_step_preview: "Предпросмотр",
+    gen_free_badge: "Free",
+    gen_prov_custom: "Свой API",
+    gen_api_key_lbl: "API-ключ",
+    gen_key_missing: "не задан",
+    gen_key_optional: "необязателен локально",
+    gen_key_env: "из {env}",
+    gen_edit_key: "Изменить",
+    gen_close_key: "Скрыть",
+    gen_refresh_models: "Обновить список моделей",
+    gen_models_refresh_short: "Модели",
+    gen_base_url_lbl: "Base URL (OpenAI-совместимый)",
+    gen_toggle_key_vis: "Показать или скрыть ключ",
+    gen_save_check: "Сохранить",
+    gen_clear_key: "Удалить",
+    gen_hint_openrouter: "Бесплатные модели (:free) и платные через единый ключ. Ключ хранится локально:",
+    gen_hint_deepseek: "Ключ хранится локально и отправляется только на https://api.deepseek.com:",
+    gen_hint_custom: "Любой OpenAI-совместимый URL (Ollama, LM Studio, vLLM, Groq, Together и др.). Для localhost ключ не обязателен.",
+    gen_model_lbl: "Модель",
+    gen_free_only_btn: "Только бесплатные",
+    gen_free_only_count: "Только бесплатные ({n})",
+    gen_model_ph: "Выберите или введите ID модели...",
+    gen_model_list_aria: "Открыть список моделей",
+    gen_model_empty: "Ничего не найдено. Можно ввести любой ID модели вручную.",
+    gen_effort_lbl: "Уровень размышлений (Effort)",
+    gen_temp_lbl: "Температура",
+    gen_context_mode_lbl: "Контекст проекта",
+    gen_context_mode_sub: "Привязка к папке на рабочем столе или чистое общение на тему",
+    gen_mode_folder: "С папкой",
+    gen_mode_plain: "Без папки",
+    gen_folder_ph: "Путь к папке на рабочем столе",
+    gen_desktop_reset_tip: "Подставить рабочий стол",
+    gen_desktop_short: "Desktop",
+    gen_pick_folder_tip: "Выбрать папку",
+    gen_folder_hint: "По умолчанию подставляется рабочий стол. Можно указать любую папку проекта.",
+    gen_topic_lbl: "Сценарий и тема диалога",
+    gen_topic_ph: "Опишите, о чем должно было быть общение с ИИ: тема, задачи, тон, ключевые шаги контекста...",
+    gen_length_lbl: "Объем диалога",
+    gen_len_short: "Короткий",
+    gen_len_medium: "Средний",
+    gen_len_long: "Длинный",
+    gen_len_custom: "Свой",
+    gen_turns_lbl: "Обменов (пар сообщений):",
+    gen_lang_lbl: "Язык диалога",
+    gen_lang_auto: "Авто (по описанию)",
+    gen_tools_lbl: "Добавить шаги инструментов и thinking",
+    gen_tools_hint: "Генерирует реалистичные вызовы инструментов (tool_use / tool_result) и блоки размышлений",
+    gen_advanced_lbl: "Системный промпт и доп. настройки",
+    gen_custom_badge: "Изменен",
+    gen_sys_template_lbl: "Системный промпт генератора",
+    gen_reset_prompt: "Сбросить",
+    gen_sys_template_ph: "Инструкции для модели-генератора...",
+    gen_contract_summary: "Обязательный JSON-формат (добавляется автоматически)",
+    gen_opt_title_lbl: "Название чата (необязательно)",
+    gen_opt_title_ph: "Сгенерируется автоматически, если оставить пустым",
+    gen_sys_prompt_lbl: "Системный промпт внутри чата (необязательно)",
+    gen_sys_prompt_ph: "Внутренние инструкции, которые добавятся в начало сохраненного чата",
+    gen_target_lbl: "Целевая площадка для сохранения",
+    gen_error_title: "Ошибка генерации",
+    gen_save_failed: "Не удалось сохранить диалог",
+    gen_loading_title: "Генерация диалога",
+    gen_phase_connect: "Подключение к модели",
+    gen_phase_compose: "Генерация реплик диалога",
+    gen_phase_format: "Сборка и проверка структуры",
+    gen_loading_meta: "{provider} · {model} · effort: {effort}",
+    gen_run_btn: "Сгенерировать",
+    gen_back_btn: "Назад",
+    gen_regen_btn: "Перегенерировать",
+    gen_save_btn: "Сохранить в {prov}",
+    gen_saving_btn: "Сохранение...",
+    gen_need_key: "Укажите API-ключ для {provider} перед генерацией.",
+    gen_need_topic: "Опишите тему или сценарий будущего диалога.",
+    gen_toast_models_ok: "Модели {provider} обновлены ({n})",
+    gen_toast_key_cleared: "API-ключ {provider} удален",
+    gen_toast_prompt_reset: "Системный промпт сброшен на стандартный",
+    gen_toast_saved: "Диалог сохранен в {prov}",
+    gen_stat_turns: "ходов: {n}",
+    gen_stat_msgs: "записей: {n}",
+    gen_stat_tools: "инструментов: {n}",
+    gen_stat_thinking: "thinking: {n}",
+    gen_drafts_btn: "Сохраненные",
+    gen_drafts_title: "Сохраненные генерации",
+    gen_drafts_sub: "Каждый сгенерированный диалог сохраняется автоматически и не пропадает при закрытии окна.",
+    gen_drafts_empty: "Сохраненных генераций пока нет",
+    gen_draft_open: "Открыть",
+    gen_draft_deleted: "Черновик удален",
+    gen_resume_label: "Есть сгенерированный диалог",
+    gen_resume_btn: "Открыть предпросмотр",
+    jump_latest: "К последним сообщениям",
+    gen_role_user: "Пользователь",
+    gen_role_assistant: "Ассистент",
+    gen_role_system: "Системный промпт",
+    gen_role_thinking: "Размышления",
+    gen_role_tool_use: "Инструмент: {name}",
+    gen_role_tool_result: "Вывод: {name}",
+    gen_cannot_delete_last: "В диалоге должно остаться хотя бы одно сообщение",
     welcome_sign_prefix: "с любовью от",
     welcome_sign_names: "quesada & k1ttyf <3",
     unlocker_default: "Этот диалог заблокирован. Хотите снять блокировку?",
@@ -545,6 +652,9 @@ const I18N = {
     empty: "Порожньо",
     transcript_only: "лише в транскрипті",
     show_more: "Показати повністю",
+    expand_full_btn: "Показати повністю ({size})",
+    loading_full_btn: "Завантаження...",
+    truncated_notice: "Показано початок великого повідомлення",
     collapse: "Згорнути",
     copy: "Копіювати",
     copied: "Скопійовано",
@@ -582,6 +692,7 @@ const I18N = {
     prev_match: "Попередній збіг",
     next_match: "Наступний збіг",
     find_no_matches: "Немає збігів",
+    find_whole_word: "Точне слово",
     slim_tip: "Очистити thinking і важкі кроки",
     slim_title: "Оптимізація контексту",
     slim_opt_thinking: "Видалити міркування (thinking)",
@@ -612,6 +723,106 @@ const I18N = {
     palette_toggle_select: "Режим вибору кількох чатів",
     palette_toggle_privacy: "Перемкнути режим приватності",
     palette_open_slim: "Оптимізація контексту та thinking",
+    palette_open_generate: "Згенерувати діалог",
+    gen_title: "Згенерувати діалог",
+    gen_btn_open: "Згенерувати діалог",
+    gen_step_setup: "Налаштування",
+    gen_step_preview: "Перегляд",
+    gen_free_badge: "Free",
+    gen_prov_custom: "Свій API",
+    gen_api_key_lbl: "API-ключ",
+    gen_key_missing: "не задано",
+    gen_key_optional: "необов'язковий локально",
+    gen_key_env: "з {env}",
+    gen_edit_key: "Змінити",
+    gen_close_key: "Сховати",
+    gen_refresh_models: "Оновити список моделей",
+    gen_models_refresh_short: "Моделі",
+    gen_base_url_lbl: "Base URL (OpenAI-сумісний)",
+    gen_toggle_key_vis: "Показати або сховати ключ",
+    gen_save_check: "Зберегти",
+    gen_clear_key: "Видалити",
+    gen_hint_openrouter: "Безкоштовні моделі (:free) і платні через єдиний ключ. Ключ зберігається локально:",
+    gen_hint_deepseek: "Ключ зберігається локально і надсилається лише на https://api.deepseek.com:",
+    gen_hint_custom: "Будь-який OpenAI-сумісний URL (Ollama, LM Studio, vLLM, Groq, Together тощо). Для localhost ключ не обов'язковий.",
+    gen_model_lbl: "Модель",
+    gen_free_only_btn: "Лише безкоштовні",
+    gen_free_only_count: "Лише безкоштовні ({n})",
+    gen_model_ph: "Оберіть або введіть ID моделі...",
+    gen_model_list_aria: "Відкрити список моделей",
+    gen_model_empty: "Нічого не знайдено. Можна ввести будь-який ID моделі вручну.",
+    gen_effort_lbl: "Рівень роздумів (Effort)",
+    gen_temp_lbl: "Температура",
+    gen_context_mode_lbl: "Контекст проєкту",
+    gen_context_mode_sub: "Прив'язка до папки на робочому столі або чисте спілкування на тему",
+    gen_mode_folder: "З папкою",
+    gen_mode_plain: "Без папки",
+    gen_folder_ph: "Шлях до папки на робочому столі",
+    gen_desktop_reset_tip: "Підставити робочий стіл",
+    gen_desktop_short: "Desktop",
+    gen_pick_folder_tip: "Обрати папку",
+    gen_folder_hint: "За замовчуванням підставляється робочий стіл. Можна вказати будь-яку папку проєкту.",
+    gen_topic_lbl: "Сценарій і тема діалогу",
+    gen_topic_ph: "Опишіть, про що мало бути спілкування з ШІ: тема, задачі, тон, ключові кроки контексту...",
+    gen_length_lbl: "Обсяг діалогу",
+    gen_len_short: "Короткий",
+    gen_len_medium: "Середній",
+    gen_len_long: "Довгий",
+    gen_len_custom: "Свій",
+    gen_turns_lbl: "Обмінів (пар повідомлень):",
+    gen_lang_lbl: "Мова діалогу",
+    gen_lang_auto: "Авто (за описом)",
+    gen_tools_lbl: "Додати кроки інструментів і thinking",
+    gen_tools_hint: "Генерує реалістичні виклики інструментів (tool_use / tool_result) і блоки роздумів",
+    gen_advanced_lbl: "Системний промпт і дод. налаштування",
+    gen_custom_badge: "Змінено",
+    gen_sys_template_lbl: "Системний промпт генератора",
+    gen_reset_prompt: "Скинути",
+    gen_sys_template_ph: "Інструкції для моделі-генератора...",
+    gen_contract_summary: "Обов'язковий JSON-формат (додається автоматично)",
+    gen_opt_title_lbl: "Назва чату (необов'язково)",
+    gen_opt_title_ph: "Згенерується автоматично, якщо залишити порожнім",
+    gen_sys_prompt_lbl: "Системний промпт усередині чату (необов'язково)",
+    gen_sys_prompt_ph: "Внутрішні інструкції, які додадуться на початок збереженого чату",
+    gen_target_lbl: "Цільовий майданчик для збереження",
+    gen_error_title: "Помилка генерації",
+    gen_save_failed: "Не вдалося зберегти діалог",
+    gen_loading_title: "Генерація діалогу",
+    gen_phase_connect: "Підключення до моделі",
+    gen_phase_compose: "Генерація реплік діалогу",
+    gen_phase_format: "Збірка та перевірка структури",
+    gen_loading_meta: "{provider} · {model} · effort: {effort}",
+    gen_run_btn: "Згенерувати",
+    gen_back_btn: "Назад",
+    gen_regen_btn: "Перегенерувати",
+    gen_save_btn: "Зберегти в {prov}",
+    gen_saving_btn: "Збереження...",
+    gen_need_key: "Вкажіть API-ключ для {provider} перед генерацією.",
+    gen_need_topic: "Опишіть тему або сценарій майбутнього діалогу.",
+    gen_toast_models_ok: "Моделі {provider} оновлено ({n})",
+    gen_toast_key_cleared: "API-ключ {provider} видалено",
+    gen_toast_prompt_reset: "Системний промпт скинуто на стандартний",
+    gen_toast_saved: "Діалог збережено в {prov}",
+    gen_stat_turns: "ходів: {n}",
+    gen_stat_msgs: "записів: {n}",
+    gen_stat_tools: "інструментів: {n}",
+    gen_stat_thinking: "thinking: {n}",
+    gen_drafts_btn: "Збережені",
+    gen_drafts_title: "Збережені генерації",
+    gen_drafts_sub: "Кожен згенерований діалог зберігається автоматично і не зникає при закритті вікна.",
+    gen_drafts_empty: "Збережених генерацій поки немає",
+    gen_draft_open: "Відкрити",
+    gen_draft_deleted: "Чернетку видалено",
+    gen_resume_label: "Є згенерований діалог",
+    gen_resume_btn: "Відкрити перегляд",
+    jump_latest: "До останніх повідомлень",
+    gen_role_user: "Користувач",
+    gen_role_assistant: "Асистент",
+    gen_role_system: "Системний промпт",
+    gen_role_thinking: "Роздуми",
+    gen_role_tool_use: "Інструмент: {name}",
+    gen_role_tool_result: "Вивід: {name}",
+    gen_cannot_delete_last: "У діалозі має залишитися хоча б одне повідомлення",
     welcome_sign_prefix: "з любов'ю від",
     welcome_sign_names: "quesada & k1ttyf <3",
     unlocker_default: "Цей діалог заблоковано. Хочете зняти блокування?",
@@ -887,6 +1098,9 @@ const I18N = {
     empty: "Empty",
     transcript_only: "transcript only",
     show_more: "Show full",
+    expand_full_btn: "Show full ({size})",
+    loading_full_btn: "Loading...",
+    truncated_notice: "Showing preview of large message",
     collapse: "Collapse",
     copy: "Copy",
     copied: "Copied",
@@ -924,6 +1138,7 @@ const I18N = {
     prev_match: "Previous match",
     next_match: "Next match",
     find_no_matches: "No matches",
+    find_whole_word: "Whole word",
     slim_tip: "Strip thinking and heavy tool outputs",
     slim_title: "Context optimizer",
     slim_opt_thinking: "Remove thinking / reasoning blocks",
@@ -954,6 +1169,106 @@ const I18N = {
     palette_toggle_select: "Toggle multi-select mode",
     palette_toggle_privacy: "Toggle privacy mode",
     palette_open_slim: "Optimize context and thinking",
+    palette_open_generate: "Generate dialogue",
+    gen_title: "Generate dialogue",
+    gen_btn_open: "Generate dialogue",
+    gen_step_setup: "Setup",
+    gen_step_preview: "Preview",
+    gen_free_badge: "Free",
+    gen_prov_custom: "Custom API",
+    gen_api_key_lbl: "API Key",
+    gen_key_missing: "not configured",
+    gen_key_optional: "optional locally",
+    gen_key_env: "from {env}",
+    gen_edit_key: "Edit",
+    gen_close_key: "Hide",
+    gen_refresh_models: "Refresh model list",
+    gen_models_refresh_short: "Models",
+    gen_base_url_lbl: "Base URL (OpenAI-compatible)",
+    gen_toggle_key_vis: "Toggle API key visibility",
+    gen_save_check: "Save",
+    gen_clear_key: "Remove",
+    gen_hint_openrouter: "Access free (:free) and paid models with one key. Stored locally:",
+    gen_hint_deepseek: "Stored locally and sent only to https://api.deepseek.com:",
+    gen_hint_custom: "Any OpenAI-compatible URL (Ollama, LM Studio, vLLM, Groq, Together, etc.). Localhost keys are optional.",
+    gen_model_lbl: "Model",
+    gen_free_only_btn: "Free only",
+    gen_free_only_count: "Free only ({n})",
+    gen_model_ph: "Choose or type a model ID...",
+    gen_model_list_aria: "Open model list",
+    gen_model_empty: "No matching models. You can type any custom model ID directly.",
+    gen_effort_lbl: "Reasoning effort",
+    gen_temp_lbl: "Temperature",
+    gen_context_mode_lbl: "Project context",
+    gen_context_mode_sub: "Attach a Desktop folder or keep it a pure topical chat",
+    gen_mode_folder: "With folder",
+    gen_mode_plain: "Topic only",
+    gen_folder_ph: "Path to folder on Desktop",
+    gen_desktop_reset_tip: "Reset to Desktop path",
+    gen_desktop_short: "Desktop",
+    gen_pick_folder_tip: "Pick folder",
+    gen_folder_hint: "Pre-filled with your Desktop path by default. You can enter any project path.",
+    gen_topic_lbl: "Dialogue scenario and topic",
+    gen_topic_ph: "Describe what the AI conversation should cover: topic, goals, tone, key context steps...",
+    gen_length_lbl: "Dialogue length",
+    gen_len_short: "Short",
+    gen_len_medium: "Medium",
+    gen_len_long: "Long",
+    gen_len_custom: "Custom",
+    gen_turns_lbl: "Exchanges (pairs):",
+    gen_lang_lbl: "Dialogue language",
+    gen_lang_auto: "Auto (match prompt)",
+    gen_tools_lbl: "Include tool calls and thinking",
+    gen_tools_hint: "Generates synthetic tool steps (tool_use / tool_result) and thinking blocks",
+    gen_advanced_lbl: "System prompt & advanced",
+    gen_custom_badge: "Custom",
+    gen_sys_template_lbl: "Generator system prompt",
+    gen_reset_prompt: "Reset to default",
+    gen_sys_template_ph: "Instructions for the dialogue generator model...",
+    gen_contract_summary: "Mandatory JSON format (always appended automatically)",
+    gen_opt_title_lbl: "Chat title (optional)",
+    gen_opt_title_ph: "Auto-generated if left blank",
+    gen_sys_prompt_lbl: "Initial chat system prompt (optional)",
+    gen_sys_prompt_ph: "Internal instructions prepended inside the saved chat",
+    gen_target_lbl: "Target environment",
+    gen_error_title: "Generation failed",
+    gen_save_failed: "Failed to save dialogue",
+    gen_loading_title: "Generating dialogue",
+    gen_phase_connect: "Connecting to model",
+    gen_phase_compose: "Writing dialogue turns",
+    gen_phase_format: "Structuring transcript",
+    gen_loading_meta: "{provider} · {model} · effort: {effort}",
+    gen_run_btn: "Generate",
+    gen_back_btn: "Back",
+    gen_regen_btn: "Regenerate",
+    gen_save_btn: "Save to {prov}",
+    gen_saving_btn: "Saving...",
+    gen_need_key: "Enter an API key for {provider} before generating.",
+    gen_need_topic: "Describe the topic or scenario for the dialogue.",
+    gen_toast_models_ok: "{provider} models updated ({n})",
+    gen_toast_key_cleared: "{provider} API key removed",
+    gen_toast_prompt_reset: "Generator system prompt reset to default",
+    gen_toast_saved: "Dialogue saved to {prov}",
+    gen_stat_turns: "turns: {n}",
+    gen_stat_msgs: "entries: {n}",
+    gen_stat_tools: "tools: {n}",
+    gen_stat_thinking: "thinking: {n}",
+    gen_drafts_btn: "Saved",
+    gen_drafts_title: "Saved generations",
+    gen_drafts_sub: "Every generated dialogue is archived automatically so accidental closes never lose your work.",
+    gen_drafts_empty: "No saved generations yet",
+    gen_draft_open: "Open",
+    gen_draft_deleted: "Draft removed",
+    gen_resume_label: "Generated dialogue ready",
+    gen_resume_btn: "Open preview",
+    jump_latest: "Jump to latest",
+    gen_role_user: "User",
+    gen_role_assistant: "Assistant",
+    gen_role_system: "System prompt",
+    gen_role_thinking: "Thinking",
+    gen_role_tool_use: "Tool: {name}",
+    gen_role_tool_result: "Output: {name}",
+    gen_cannot_delete_last: "At least one message must remain in the dialogue",
     welcome_sign_prefix: "with love from",
     welcome_sign_names: "quesada & k1ttyf <3",
     unlocker_default: "This dialogue is locked. Do you want to unlock it?",
@@ -1096,6 +1411,20 @@ function localizeKind(kind) {
     "Служебное сообщение": "Службове повідомлення",
     "Компакция": "Компакція",
     "Компакция (сводка)": "Компакція (зведення)",
+    "Системное уведомление": "Системне сповіщення",
+    "Уведомление безопасности (Safeguard)": "Сповіщення безпеки (Safeguard)",
+    "Уведомление безопасности (Safety Classifier)": "Сповіщення безпеки (Safety Classifier)",
+    "Системная команда / контекст": "Системна команда / контекст",
+    "Локальная команда": "Локальна команда",
+    "Системная заметка (Meta)": "Системна нотатка (Meta)",
+    "Сообщение агента (Peer)": "Повідомлення агента (Peer)",
+    "Уведомление Claude (Notice)": "Сповіщення Claude (Notice)",
+    "Информация Claude": "Інформація Claude",
+    "Рекомендация Claude": "Рекомендація Claude",
+    "Предупреждение Claude": "Попередження Claude",
+    "Размышления (thinking)": "Міркування (thinking)",
+    "Размышления модели (thinking)": "Міркування моделі (thinking)",
+    "Вывод инструмента (tool_result)": "Вивід інструменту (tool_result)",
     "Сообщение об ошибке": "Повідомлення про помилку",
     "Ошибка OpenCode": "Помилка OpenCode",
     "Вывод инструмента": "Вивід інструменту",
@@ -1123,6 +1452,20 @@ function localizeKind(kind) {
     "Служебное сообщение": "Service message",
     "Компакция": "Compaction",
     "Компакция (сводка)": "Compaction summary",
+    "Системное уведомление": "System notice",
+    "Уведомление безопасности (Safeguard)": "Safety notice (Safeguard)",
+    "Уведомление безопасности (Safety Classifier)": "Safety Classifier notice",
+    "Системная команда / контекст": "System command / context",
+    "Локальная команда": "Local command",
+    "Системная заметка (Meta)": "System note (Meta)",
+    "Сообщение агента (Peer)": "Agent message (Peer)",
+    "Уведомление Claude (Notice)": "Claude notice",
+    "Информация Claude": "Claude info",
+    "Рекомендация Claude": "Claude suggestion",
+    "Предупреждение Claude": "Claude warning",
+    "Размышления (thinking)": "Reasoning (thinking)",
+    "Размышления модели (thinking)": "Model reasoning (thinking)",
+    "Вывод инструмента (tool_result)": "Tool output (tool_result)",
     "Сообщение об ошибке": "Error message",
     "Ошибка OpenCode": "OpenCode error",
     "Вывод инструмента": "Tool output",
@@ -1211,6 +1554,382 @@ function localizeUnlockerCategory(cat) {
     .replace("Блокировка ", "Blocked: ")
     .replace("Ошибка ", "Error: ")
     .replace("Ограничение ", "Limit: ");
+}
+
+const BACKEND_EXACT_I18N = new Map([
+  ["После изменения заново откройте тред в Codex; перестроение проекции может занять время.", {
+    en: "Reopen the thread in Codex after this change; rebuilding the projection may take a moment.",
+    uk: "Після зміни заново відкрийте тред у Codex; перебудова проєкції може зайняти час.",
+  }],
+  ["После изменения заново откройте тред в Codex.", {
+    en: "Reopen the thread in Codex after this change.",
+    uk: "Після зміни заново відкрийте тред у Codex.",
+  }],
+  ["ТЕСТ-РЕЖИМ: изменения пишутся в песочницу.", {
+    en: "TEST MODE: changes are written to the sandbox.",
+    uk: "ТЕСТ-РЕЖИМ: зміни записуються в пісочницю.",
+  }],
+  ["ТЕСТ-РЕЖИМ: изменения сохраняются в песочницу.", {
+    en: "TEST MODE: changes are saved to the sandbox.",
+    uk: "ТЕСТ-РЕЖИМ: зміни зберігаються в пісочницю.",
+  }],
+  ["ТЕСТ-РЕЖИМ: изменения сохранены в песочницу.", {
+    en: "TEST MODE: changes were saved to the sandbox.",
+    uk: "ТЕСТ-РЕЖИМ: зміни збережені в пісочницю.",
+  }],
+  ["Тест-режим: данные пишутся в песочницу.", {
+    en: "Test mode: data is written to the sandbox.",
+    uk: "Тест-режим: дані записуються в пісочницю.",
+  }],
+  ["Тест-режим: изменения пишутся в песочницу.", {
+    en: "Test mode: changes are written to the sandbox.",
+    uk: "Тест-режим: зміни записуються в пісочницю.",
+  }],
+  ["Обнаружен запущенный Codex. Перезапустите приложение для обновления списка.", {
+    en: "Codex is running. Restart Codex to refresh the thread list.",
+    uk: "Виявлено запущений Codex. Перезапустіть застосунок для оновлення списку.",
+  }],
+  ["Чат успешно разблокирован K1tty Tools. Обновите диалог в приложении Codex.", {
+    en: "Dialogue unlocked by K1tty Tools. Reopen the thread in Codex.",
+    uk: "Чат успішно розблоковано K1tty Tools. Оновіть діалог у застосунку Codex.",
+  }],
+  ["Чат заблокирован. Вы можете разбанить его в любой момент.", {
+    en: "Dialogue locked. You can unlock it anytime.",
+    uk: "Чат заблоковано. Ви можете розблокувати його в будь-який момент.",
+  }],
+  ["Файл диалога занят Codex. Закройте этот тред в Codex или закройте приложение.", {
+    en: "Thread file is in use by Codex. Close this thread or quit Codex.",
+    uk: "Файл діалогу зайнятий Codex. Закрийте цей тред у Codex або закрийте застосунок.",
+  }],
+  ["База проекций Codex занята. Закройте Codex и повторите.", {
+    en: "Codex projection database is busy. Close Codex and try again.",
+    uk: "База проєкцій Codex зайнята. Закрийте Codex і повторіть.",
+  }],
+  ["Файл занят Codex. Закройте активный тред.", {
+    en: "File is in use by Codex. Close the active thread.",
+    uk: "Файл зайнятий Codex. Закрийте активний тред.",
+  }],
+  ["История изменилась после предпросмотра.", {
+    en: "Conversation changed after preview. Reopen the message and try again.",
+    uk: "Історія змінилася після перегляду. Відкрийте повідомлення знову.",
+  }],
+  ["Изменение многосегментного треда вне песочницы недоступно (только чтение).", {
+    en: "Editing multi-file threads outside sandbox is unavailable (read-only).",
+    uk: "Зміна багатосегментного треду поза пісочницею недоступна (лише читання).",
+  }],
+  ["Очистка многосегментного треда вне песочницы недоступна.", {
+    en: "Cleaning multi-file threads outside sandbox is unavailable.",
+    uk: "Очищення багатосегментного треду поза пісочницею недоступне.",
+  }],
+  ["Обрезка начала многосегментного треда пока не поддерживается", {
+    en: "Trimming the start of a multi-file thread is not supported yet.",
+    uk: "Обрізання початку багатосегментного треду поки не підтримується.",
+  }],
+  ["Удаление всего файла треда не поддерживается", {
+    en: "Deleting the entire thread file via cut is not supported.",
+    uk: "Видалення всього файлу треду не підтримується.",
+  }],
+  ["Нельзя удалить метаданные сессии", {
+    en: "Cannot remove session metadata.",
+    uk: "Не можна видалити метадані сесії.",
+  }],
+  ["Копия без backup.meta.json", {
+    en: "Backup is missing backup.meta.json",
+    uk: "Копія без backup.meta.json",
+  }],
+  ["Старая копия без контрольных сумм требует ручного восстановления", {
+    en: "Legacy backup without checksums requires manual restore.",
+    uk: "Стара копія без контрольних сум потребує ручного відновлення.",
+  }],
+  ["Старая копия без контрольных сумм требует ручного восстановления.", {
+    en: "Legacy backup without checksums requires manual restore.",
+    uk: "Стара копія без контрольних сум потребує ручного відновлення.",
+  }],
+  ["Укажите причину блокировки чата.", {
+    en: "Enter a lock reason message.",
+    uk: "Вкажіть причину блокування чату.",
+  }],
+  ["Укажите причину блокировки.", {
+    en: "Enter a lock reason.",
+    uk: "Вкажіть причину блокування.",
+  }],
+  ["Обнаружен запущенный процесс Claude Code. Перезапустите сессию в терминале.", {
+    en: "Claude Code process is running. Restart the session in your terminal.",
+    uk: "Виявлено запущений процес Claude Code. Перезапустіть сесію в терміналі.",
+  }],
+  ["Запущен Claude. Перезапустите сессию в приложении или терминале.", {
+    en: "Claude is running. Restart the session in the app or terminal.",
+    uk: "Запущено Claude. Перезапустіть сесію в застосунку або терміналі.",
+  }],
+  ["Запущен Claude. Переоткройте сессию для обновления.", {
+    en: "Claude is running. Reopen the session to see updated messages.",
+    uk: "Запущено Claude. Перевідкрийте сесію для оновлення.",
+  }],
+  ["Файл сессии занят Claude. Закройте активную сессию Claude и повторите.", {
+    en: "Session file is locked by Claude. Close the active Claude session and retry.",
+    uk: "Файл сесії зайнятий Claude. Закрийте активну сесію Claude і повторіть.",
+  }],
+  ["Файл сессии доступен только для чтения.", {
+    en: "Session file is read-only.",
+    uk: "Файл сесії доступний лише для читання.",
+  }],
+  ["Сессия изменилась после предпросмотра. Обновите страницу и повторите действие.", {
+    en: "Session changed after preview. Refresh and try again.",
+    uk: "Сесія змінилася після перегляду. Оновіть і повторіть дію.",
+  }],
+  ["Ключ не указывает на редактируемое сообщение Claude.", {
+    en: "This entry is not an editable Claude message.",
+    uk: "Ключ не вказує на повідомлення Claude, яке можна редагувати.",
+  }],
+  ["Введите текст уведомления.", {
+    en: "Enter notice text.",
+    uk: "Введіть текст сповіщення.",
+  }],
+  ["Укажите текст системного уведомления.", {
+    en: "Enter system notice text.",
+    uk: "Вкажіть текст системного сповіщення.",
+  }],
+  ["В цепочке уведомлений Claude обнаружена циклическая ссылка. Изменение отменено.", {
+    en: "Circular parentUuid reference detected in Claude notices. Edit cancelled.",
+    uk: "У ланцюжку сповіщень Claude виявлено циклічне посилання. Зміну скасовано.",
+  }],
+  ["OpenCode запущен, но база доступна в WAL-режиме. Переоткройте диалог в OpenCode после правки.", {
+    en: "OpenCode is running, database is writable in WAL mode. Reopen the thread in OpenCode after editing.",
+    uk: "OpenCode запущено, але база доступна в WAL-режимі. Перевідкрийте діалог в OpenCode після правки.",
+  }],
+  ["Диалог изменился во время редактирования. Откройте сообщение заново.", {
+    en: "Dialogue changed while editing. Reopen the message and retry.",
+    uk: "Діалог змінився під час редагування. Відкрийте повідомлення заново.",
+  }],
+  ["В тексте должен остаться блок <USER_REQUEST>…</USER_REQUEST>", {
+    en: "Text must keep the <USER_REQUEST>...</USER_REQUEST> block.",
+    uk: "У тексті має залишитися блок <USER_REQUEST>...</USER_REQUEST>.",
+  }],
+  ["Некорректный JSON для tool_calls", {
+    en: "Invalid JSON for tool_calls.",
+    uk: "Некоректний JSON для tool_calls.",
+  }],
+  ["Ожидался JSON-объект с полем tool_calls или массив вызовов", {
+    en: "Expected a JSON object with tool_calls or an array of calls.",
+    uk: "Очікувався JSON-об'єкт з полем tool_calls або масив викликів.",
+  }],
+  ["В этом служебном шаге нет редактируемого текстового поля в БД (возможно, бинарные данные или вложение).", {
+    en: "This service step has no editable text field in the DB (likely binary data or attachment).",
+    uk: "У цьому службовому кроці немає текстового поля для редагування в БД.",
+  }],
+  ["В этом сообщении не найден текст запроса для замены (возможно, только вложение)", {
+    en: "No request text found to replace in this message (possibly attachment only).",
+    uk: "У цьому повідомленні не знайдено тексту запиту для заміни.",
+  }],
+  ["Пустой текст, сохранение отменено.", {
+    en: "Text is empty, save cancelled.",
+    uk: "Порожній текст, збереження скасовано.",
+  }],
+  ["Пустой текст, сохранение не выполнено.", {
+    en: "Text is empty, save cancelled.",
+    uk: "Порожній текст, збереження не виконано.",
+  }],
+  ["Выберите хотя бы одну опцию очистки.", {
+    en: "Select at least one cleanup option.",
+    uk: "Оберіть принаймні одну опцію очищення.",
+  }],
+  ["Внутренняя ошибка операции. Проверьте резервную копию.", {
+    en: "Internal operation error. Please check your backup.",
+    uk: "Внутрішня помилка операції. Перевірте резервну копію.",
+  }],
+  ["Удаление одиночной записи не поддерживается этим провайдером", {
+    en: "Deleting individual entries is not supported by this provider.",
+    uk: "Видалення окремого запису не підтримується цим провайдером.",
+  }],
+  ["Требуется подтверждение.", {
+    en: "Confirmation required.",
+    uk: "Потрібне підтвердження.",
+  }],
+  ["Файл занят другим процессом.", {
+    en: "File is in use by another process.",
+    uk: "Файл зайнятий іншим процесом.",
+  }],
+  ["Экспорт устарел. Экспортируйте диалог ещё раз.", {
+    en: "Export expired. Please export the dialogue again.",
+    uk: "Експорт застарів. Експортуйте діалог ще раз.",
+  }],
+  ["Файл импорта устарел. Выберите его ещё раз.", {
+    en: "Import token expired. Please select the file again.",
+    uk: "Файл імпорту застарів. Оберіть його ще раз.",
+  }],
+  ["Пустой файл.", {
+    en: "File is empty.",
+    uk: "Порожній файл.",
+  }],
+  ["Архив превышает допустимый размер 512 МиБ.", {
+    en: "Archive exceeds the 512 MiB limit.",
+    uk: "Архів перевищує допустимий розмір 512 МіБ.",
+  }],
+  ["В выбранном диалоге нет сообщений для конвертации.", {
+    en: "No messages to convert in this dialogue.",
+    uk: "У вибраному діалозі немає повідомлень для конвертації.",
+  }],
+  ["В выбранном диалоге нет сообщений для экспорта.", {
+    en: "No messages to export in this dialogue.",
+    uk: "У вибраному діалозі немає повідомлень для експорту.",
+  }],
+  ["В файле нет сообщений для импорта.", {
+    en: "No messages found to import in this archive.",
+    uk: "У файлі немає повідомлень для імпорту.",
+  }],
+  ["Системные уведомления доступны только для диалогов Claude.", {
+    en: "System notices are only available for Claude dialogues.",
+    uk: "Системні сповіщення доступні лише для діалогів Claude.",
+  }],
+  ["Живой анлок БД поддерживается только для Antigravity.", {
+    en: "Live DB unlock is only supported for Antigravity.",
+    uk: "Живий анлок БД підтримується лише для Antigravity.",
+  }],
+  ["Опишите тему или сценарий будущего диалога.", {
+    en: "Describe the topic or scenario for the dialogue.",
+    uk: "Опишіть тему або сценарій майбутнього діалогу.",
+  }],
+  ["Модель вернула ответ не в JSON-формате. Попробуйте повторить генерацию.", {
+    en: "Model did not return valid JSON. Please try generating again.",
+    uk: "Модель повернула відповідь не у форматі JSON. Спробуйте повторити генерацію.",
+  }],
+  ["Модель вернула пустой список сообщений. Попробуйте уточнить описание сценария.", {
+    en: "Model returned an empty message list. Try refining the scenario.",
+    uk: "Модель повернула порожній список повідомлень. Спробуйте уточнити сценарій.",
+  }],
+]);
+
+const BACKEND_PATTERNS = [
+  [/^Авто-рестарт Hub:\s*перезапущен language_server \(PID:\s*(.+?)\)\.\s*(.+?) перечитает обновлённую БД\.?$/, (m, lang) =>
+    lang === "uk"
+      ? `Авто-рестарт Hub: перезапущено language_server (PID: ${m[1]}). ${m[2]} перечитає оновлену БД.`
+      : `Hub auto-restarted: language_server (PID: ${m[1]}). ${m[2]} will reload the updated DB.`],
+  [/^Live Unlock:\s*правка записана в WAL-БД (.+?) при активном диалоге\.\s*Чтобы приложение подхватило изменения из БД, переоткройте диалог или перезапустите Hub\.?$/, (m, lang) =>
+    lang === "uk"
+      ? `Live Unlock: правку записано в WAL-БД ${m[1]} при активному діалозі. Щоб застосунок підхопив зміни, перевідкрийте діалог або перезапустіть Hub.`
+      : `Live Unlock: change written to WAL DB ${m[1]} while active. Reopen the dialogue or restart Hub for the app to pick it up.`],
+  [/^(.+?) запущен, но файлы этого диалога свободны\.\s*Изменения появятся в приложении после его перезапуска\.?$/, (m, lang) =>
+    lang === "uk"
+      ? `${m[1]} запущено, але файли цього діалогу вільні. Зміни з'являться після перезапуску застосунку.`
+      : `${m[1]} is running, but this dialogue's files are unlocked. Changes will appear after restarting ${m[1]}.`],
+  [/^Запущено:\s*(.+?),\s*файлы свободны\.\s*Изменения применятся после перезапуска\.?$/, (m, lang) =>
+    lang === "uk"
+      ? `Запущено: ${m[1]}, файли вільні. Зміни застосуються після перезапуску.`
+      : `Running: ${m[1]}, files are unlocked. Changes take effect after restart.`],
+  [/^Запущено:\s*(.+?)\.\s*Закройте тред в Codex перед правкой и откройте заново после\.?$/, (m, lang) =>
+    lang === "uk"
+      ? `Запущено: ${m[1]}. Закрийте тред у Codex перед правкою і відкрийте знову після.`
+      : `Running: ${m[1]}. Close the thread in Codex before editing and reopen it afterward.`],
+  [/^Запущено:\s*(.+?)\.\s*Закройте активную сессию перед правкой\.?$/, (m, lang) =>
+    lang === "uk"
+      ? `Запущено: ${m[1]}. Закрийте активну сесію перед правкою.`
+      : `Running: ${m[1]}. Close the active session before editing.`],
+  [/^Запущено:\s*(.+?)\.\s*Переоткройте диалог в OpenCode после правки\.?$/, (m, lang) =>
+    lang === "uk"
+      ? `Запущено: ${m[1]}. Перевідкрийте діалог в OpenCode після правки.`
+      : `Running: ${m[1]}. Reopen the thread in OpenCode after editing.`],
+  [/^Файлы диалога (.+?) удерживаются процессом language_server\.exe\.\s*Перезапустите Hub или включите «Авто-рестарт Antigravity Hub»\.?$/, (m, lang) =>
+    lang === "uk"
+      ? `Файли діалогу ${m[1]} утримуються процесом language_server.exe. Перезапустіть Hub або увімкніть авто-рестарт Hub.`
+      : `Dialogue files (${m[1]}) are held by language_server.exe. Restart Hub or enable Auto-restart Hub.`],
+  [/^Файлы диалогов заняты \((.+?)\)\.\s*Закройте приложение для правки\.?$/, (m, lang) =>
+    lang === "uk"
+      ? `Файли діалогів зайняті (${m[1]}). Закрийте застосунок для редагування.`
+      : `Dialogue files are busy (${m[1]}). Close the app to edit.`],
+  [/^SQLite-база (.+?) сейчас физически занята\.\s*Подождите секунду или перезапустите Hub\.?$/, (m, lang) =>
+    lang === "uk"
+      ? `SQLite-база ${m[1]} зараз фізично зайнята. Зачекайте секунду або перезапустіть Hub.`
+      : `SQLite database ${m[1]} is currently busy. Wait a moment or restart Hub.`],
+  [/^База сводок (.+?) сейчас физически занята\.\s*Подождите секунду или перезапустите Hub\.?$/, (m, lang) =>
+    lang === "uk"
+      ? `База зведень ${m[1]} зараз фізично зайнята. Зачекайте секунду або перезапустіть Hub.`
+      : `Summaries database ${m[1]} is currently busy. Wait a moment or restart Hub.`],
+  [/^Файл диалога (.+?) занят(?:\s*\((.+?)\))?\.\s*Закройте (.+?) и повторите\.?$/, (m, lang) =>
+    lang === "uk"
+      ? `Файл діалогу ${m[1]} зайнятий${m[2] ? ` (${m[2]})` : ""}. Закрийте ${m[3]} і повторіть.`
+      : `Dialogue file ${m[1]} is locked${m[2] ? ` (${m[2]})` : ""}. Close ${m[3]} and retry.`],
+  [/^База данных OpenCode занята \((.+?)\)\.\s*Закройте OpenCode и повторите\.?$/, (m, lang) =>
+    lang === "uk"
+      ? `База даних OpenCode зайнята (${m[1]}). Закрийте OpenCode і повторіть.`
+      : `OpenCode database is locked (${m[1]}). Close OpenCode and retry.`],
+  [/^База занята \((.+?)\)\.\s*Закройте OpenCode для правки\.?$/, (m, lang) =>
+    lang === "uk"
+      ? `База зайнята (${m[1]}). Закрийте OpenCode для правки.`
+      : `Database is busy (${m[1]}). Close OpenCode to edit.`],
+  [/^База (.+?) занята(?:\s*\((.+?)\))?\.\s*Закройте (.+?) и повторіть\.?$/, (m, lang) =>
+    lang === "uk"
+      ? `База ${m[1]} зайнята${m[2] ? ` (${m[2]})` : ""}. Закрийте ${m[3]} і повторіть.`
+      : `Database ${m[1]} is locked${m[2] ? ` (${m[2]})` : ""}. Close ${m[3]} and retry.`],
+  [/^Тред (?:Codex )?(.+?) не найден\.?$/, (m, lang) =>
+    lang === "uk" ? `Тред ${m[1]} не знайдено.` : `Thread ${m[1]} not found.`],
+  [/^Диалог (.+?) не найден\.?$/, (m, lang) =>
+    lang === "uk" ? `Діалог ${m[1]} не знайдено.` : `Dialogue ${m[1]} not found.`],
+  [/^Сессия OpenCode (.+?) не найдена\.?$/, (m, lang) =>
+    lang === "uk" ? `Сесію OpenCode ${m[1]} не знайдено.` : `OpenCode session ${m[1]} not found.`],
+  [/^Файл сессии (.+?) не найден\.?$/, (m, lang) =>
+    lang === "uk" ? `Файл сесії ${m[1]} не знайдено.` : `Session file ${m[1]} not found.`],
+  [/^Запись с ключом (.+?) не найдена в сессии\.?$/, (m, lang) =>
+    lang === "uk" ? `Запис із ключем ${m[1]} не знайдено в сесії.` : `Entry ${m[1]} not found in session.`],
+  [/^Шага #(.+?) нет в базе данных \(существует только в транскрипте\), править нечего\.?$/, (m, lang) =>
+    lang === "uk"
+      ? `Кроку #${m[1]} немає в базі даних (існує лише в транскрипті), редагувати нічого.`
+      : `Step #${m[1]} is not in the DB (transcript-only), nothing to edit.`],
+  [/^Шаг типа (.+?) не поддерживает редактирование текста\.?$/, (m, lang) =>
+    lang === "uk" ? `Крок типу ${m[1]} не підтримує редагування тексту.` : `Step type ${m[1]} does not support text editing.`],
+  [/^Тип сообщения (.+?) не поддерживает редактирование\.?$/, (m, lang) =>
+    lang === "uk" ? `Тип повідомлення ${m[1]} не підтримує редагування.` : `Message type ${m[1]} is not editable.`],
+  [/^Фрагмент типа (.+?) не поддерживает редактирование\.?$/, (m, lang) =>
+    lang === "uk" ? `Фрагмент типу ${m[1]} не підтримує редагування.` : `Part type ${m[1]} is not editable.`],
+  [/^Файл занят или недоступен:\s*(.+)$/, (m, lang) =>
+    lang === "uk" ? `Файл зайнятий або недоступний: ${m[1]}` : `File is locked or unavailable: ${m[1]}`],
+  [/^Укажите API-ключ (.+?) перед генерацией\.?$/, (m, lang) =>
+    lang === "uk" ? `Вкажіть API-ключ ${m[1]} перед генерацією.` : `Enter an API key for ${m[1]} before generating.`],
+  [/^Укажите API-ключ (.+?) для загрузки списка моделей\.?$/, (m, lang) =>
+    lang === "uk" ? `Вкажіть API-ключ ${m[1]} для завантаження списку моделей.` : `Enter an API key for ${m[1]} to fetch models.`],
+  [/^Неверный API-ключ (.+?) \(401\)\..*$/, (m, lang) =>
+    lang === "uk" ? `Невірний API-ключ ${m[1]} (401). Перевірте ключ і повторіть.` : `Invalid ${m[1]} API key (401). Check your key and retry.`],
+  [/^Недостаточно средств на балансе (.+?) \(402\)\..*$/, (m, lang) =>
+    lang === "uk" ? `Недостатньо коштів на балансі ${m[1]} (402). Оберіть безкоштовну модель (:free) або поповніть баланс.` : `Insufficient ${m[1]} balance (402). Pick a :free model or top up.`],
+  [/^Превышен лимит запросов (.+?) \(429\)\..*$/, (m, lang) =>
+    lang === "uk" ? `Перевищено ліміт запитів ${m[1]} (429). Спробуйте трохи пізніше або перемкніть модель.` : `${m[1]} rate limit exceeded (429). Wait a moment or switch models.`],
+  [/^Ошибка (.+?) API \(HTTP (\d+)\)(?::\s*(.*))?\.?$/, (m, lang) =>
+    lang === "uk"
+      ? `Помилка ${m[1]} API (HTTP ${m[2]})${m[3] ? `: ${m[3]}` : "."}`
+      : `${m[1]} API error (HTTP ${m[2]})${m[3] ? `: ${m[3]}` : "."}`],
+  [/^Сбой соединения с (.+?):\s*(.+)$/, (m, lang) =>
+    lang === "uk" ? `Збій з'єднання з ${m[1]}: ${m[2]}` : `Connection error with ${m[1]}: ${m[2]}`],
+  [/^Не удалось подключиться к (.+?):\s*(.+)$/, (m, lang) =>
+    lang === "uk" ? `Не вдалося підключитися до ${m[1]}: ${m[2]}` : `Could not connect to ${m[1]}: ${m[2]}`],
+  [/^Модель вернула ответ не в JSON-формате\.\s*Ответ модели:\s*(.+)$/, (m, lang) =>
+    lang === "uk" ? `Модель повернула відповідь не у форматі JSON. Відповідь: ${m[1]}` : `Model did not return JSON. Response: ${m[1]}`],
+  [/^(.+?) исчерпал лимит токенов на размышления \(finish_reason=length\)\..*$/, (m, lang) =>
+    lang === "uk" ? `${m[1]} вичерпав ліміт токенів на роздуми (finish_reason=length). Зменште Effort до Off або Low.` : `${m[1]} exhausted reasoning token budget (finish_reason=length). Lower Effort to Off or Low.`],
+  [/^Ответ (.+?) оборвался по лимиту токенов \(finish_reason=length\)\..*$/, (m, lang) =>
+    lang === "uk" ? `Відповідь ${m[1]} обірвалася через ліміт токенів (finish_reason=length). Зменште Effort або оберіть коротший діалог.` : `${m[1]} response truncated at token limit (finish_reason=length). Lower Effort or choose a shorter dialogue.`],
+  [/^(.+?) заблокировал ответ фильтром контента \(finish_reason=content_filter\)\..*$/, (m, lang) =>
+    lang === "uk" ? `${m[1]} заблокував відповідь фільтром контенту (finish_reason=content_filter). Спробуйте іншу модель або формулювання.` : `${m[1]} blocked output with content filter (finish_reason=content_filter). Try another model or prompt.`],
+  [/^(.+?) вернул пустой ответ \(finish_reason=([^)]+)\)\..*$/, (m, lang) =>
+    lang === "uk" ? `${m[1]} повернув порожню відповідь (finish_reason=${m[2]}). Зменште Effort або оберіть іншу модель.` : `${m[1]} returned empty output (finish_reason=${m[2]}). Lower Effort or switch models.`],
+  [/^(.+?) вернул пустой ответ\..*$/, (m, lang) =>
+    lang === "uk" ? `${m[1]} повернув порожню відповідь. Спробуйте інший Effort або модель.` : `${m[1]} returned empty output. Try another Effort or model.`],
+];
+
+function localizeBackendText(raw) {
+  if (raw == null) return "";
+  const text = String(raw);
+  if (!text || CUR_LANG === "ru") return text;
+  const lang = CUR_LANG === "uk" ? "uk" : "en";
+  if (text.includes("\n")) {
+    return text.split("\n").map((part) => localizeBackendText(part)).join("\n");
+  }
+  const clean = text.trim().replace(/\s+/g, " ");
+  const exact = BACKEND_EXACT_I18N.get(clean);
+  if (exact) return exact[lang] || text;
+  for (const [re, fn] of BACKEND_PATTERNS) {
+    const match = clean.match(re);
+    if (match) return fn(match, lang);
+  }
+  return text;
 }
 
 const PROV = {
@@ -1471,6 +2190,7 @@ const PHASE_PCT = { start: 12, read: 34, backup: 34, cut: 68, edit: 68, write: 7
 function onJobEvent(job) {
   const bar = $("#jobBar");
   bar.classList.remove("hidden");
+  bar.classList.toggle("is-error", job.state === "error");
   const pct = PHASE_PCT[job.phase] ?? 20;
   const pkey = "phase_" + job.phase;
   $("#jobPhase").textContent = (I18N[CUR_LANG] && I18N[CUR_LANG][pkey]) ? t(pkey) : job.phase;
@@ -1481,6 +2201,7 @@ function onJobEvent(job) {
     finishedJobs.set(job.id, job);
     setTimeout(() => {
       bar.classList.add("hidden");
+      bar.classList.remove("is-error");
       $("#jobFill").style.transform = "scaleX(0)";
     }, job.state === "done" ? 750 : 1400);
     const h = jobHandlers.get(job.id);
@@ -1488,7 +2209,7 @@ function onJobEvent(job) {
       jobHandlers.delete(job.id);
       finishedJobs.delete(job.id);
       if (job.state === "done") h.resolve(job);
-      else h.reject(new Error(job.error || t("err_op")));
+      else h.reject(new Error(localizeBackendText(job.error) || t("err_op")));
     }
   }
   while (finishedJobs.size > 60) finishedJobs.delete(finishedJobs.keys().next().value);
@@ -1498,7 +2219,7 @@ function waitJob(jobId) {
   const done = finishedJobs.get(jobId);
   if (done) {
     finishedJobs.delete(jobId);
-    return done.state === "done" ? Promise.resolve(done) : Promise.reject(new Error(done.error));
+    return done.state === "done" ? Promise.resolve(done) : Promise.reject(new Error(localizeBackendText(done.error) || t("err_op")));
   }
   return new Promise((resolve, reject) => jobHandlers.set(jobId, { resolve, reject }));
 }
@@ -1551,10 +2272,11 @@ document.addEventListener("click", (ev) => {
 
 let toastTimer = null;
 function toast(msg, cls = "", action = null) {
+  const localized = localizeBackendText(msg);
   const tEl = $("#toast");
   const iconName = cls === "ok" ? "check-circle" : cls === "err" ? "alert" : "info";
   tEl.className = "toast show " + cls;
-  tEl.innerHTML = `${ico(iconName)}<span>${esc(msg)}</span>` +
+  tEl.innerHTML = `${ico(iconName)}<span>${esc(localized)}</span>` +
     (action ? `<button class="btn sm" id="toastActBtn">${esc(action.label)}</button>` : "");
   if (action) {
     $("#toastActBtn").onclick = () => {
@@ -1606,7 +2328,7 @@ function fmtShortMtime(s) {
 }
 
 const CODE_STORE = [];
-const escAttr = (s) => esc(s).replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+const escAttr = esc;
 
 function isLocalPathTarget(raw) {
   const s = String(raw || "").trim();
@@ -1714,7 +2436,7 @@ function renderMathHTML(rawTex, display) {
           throwOnError: false,
           strict: "ignore",
           trust: false,
-          output: "htmlAndMathml",
+          output: "html",
           maxSize: 40,
           maxExpand: 2000,
         });
@@ -1722,7 +2444,9 @@ function renderMathHTML(rawTex, display) {
         inner = null;
       }
     }
-    if (MATH_CACHE.size > 1500) MATH_CACHE.clear();
+    while (MATH_CACHE.size >= 1500) {
+      MATH_CACHE.delete(MATH_CACHE.keys().next().value);
+    }
     MATH_CACHE.set(cacheKey, inner);
   }
   const cls = display ? "md-math is-display" : "md-math";
@@ -1742,69 +2466,103 @@ function looksLikeInlineMath(body) {
 
 function fmtInline(rawLine) {
   if (!rawLine) return "";
+  let s = String(rawLine);
+  if (s.length > 8000) return esc(s);
   const inlines = [];
   const stash = (html) => {
     const id = inlines.length;
     inlines.push(html);
     return `\x00IN${id}\x00`;
   };
-  let s = String(rawLine);
 
-  s = s.replace(/``([^`\n]+?)``|`([^`\n]+?)`/g, (_, dbl, sgl) => {
-    const codeText = dbl !== undefined ? dbl.trim() : sgl;
-    if (isLocalPathTarget(codeText)) {
-      return stash(renderFileLinkHTML(codeText, codeText, { isInlineCode: true }));
-    }
-    return stash(`<code class="inline">${esc(codeText)}</code>`);
-  });
-
-  s = s.replace(/\\\$/g, () => stash("$"));
-  s = s.replace(/\$\$([^\n]+?)\$\$/g, (full, tex) => (tex.trim() ? stash(renderMathHTML(tex, true)) : full));
-  s = s.replace(/\\\[([^\n]+?)\\\]/g, (full, tex) => (tex.trim() ? stash(renderMathHTML(tex, true)) : full));
-  s = s.replace(/\\\(([^\n]+?)\\\)/g, (full, tex) => (tex.trim() ? stash(renderMathHTML(tex, false)) : full));
-  s = s.replace(/(^|[^\\$\w])\$([^$\n]+?)\$(?![\w$])/g, (full, lead, tex) => {
-    if (!looksLikeInlineMath(tex)) return full;
-    return lead + stash(renderMathHTML(tex, false));
-  });
-
-  s = s.replace(
-    /\[([^\]\n]+)\]\((?:<([^>\n]+)>|((?:file:\/\/\/?|[A-Za-z]:[\\/]|~[\\/]|%(?:USERPROFILE|APPDATA|LOCALAPPDATA|TEMP|TMP)%[\\/])[^)\n]+)|((?:[^()\s]|\([^()\s]*\))+))\)/g,
-    (full, label, angleTarget, pathTarget, stdTarget) => {
-      const target = (angleTarget || pathTarget || stdTarget || "").trim();
-      if (!target) return full;
-      if (isLocalPathTarget(target)) return stash(renderFileLinkHTML(label, target));
-      if (/^(?:https?:\/\/|mailto:)/i.test(target)) return stash(renderWebLinkHTML(label, target));
-      if (/^[.\w/-]+\.[A-Za-z0-9]{1,12}(?:(?:#L?\d+(?:-L?\d+)?)|(?::\d+(?:[-:]\d+)?))?$/.test(target)) {
-        return stash(`<span class="md-file-ref" title="${escAttr(target)}">${ico("file-text", "md-file-ico")}<span class="md-file-name">${esc(label)}</span></span>`);
+  if (s.includes("`")) {
+    s = s.replace(/``([^`\n]+?)``|`([^`\n]+?)`/g, (_, dbl, sgl) => {
+      const codeText = dbl !== undefined ? dbl.trim() : sgl;
+      if (isLocalPathTarget(codeText)) {
+        return stash(renderFileLinkHTML(codeText, codeText, { isInlineCode: true }));
       }
-      return full;
+      return stash(`<code class="inline">${esc(codeText)}</code>`);
+    });
+  }
+
+  const hasDollar = s.includes("$");
+  const hasBackslash = s.includes("\\");
+  if (hasDollar || hasBackslash) {
+    if (hasBackslash && hasDollar) s = s.replace(/\\\$/g, () => stash("$"));
+    if (hasDollar && s.includes("$$")) {
+      s = s.replace(/\$\$([^\n]+?)\$\$/g, (full, tex) => (tex.trim() ? stash(renderMathHTML(tex, true)) : full));
     }
-  );
+    if (hasBackslash && s.includes("\\[")) {
+      s = s.replace(/\\\[([^\n]+?)\\\]/g, (full, tex) => (tex.trim() ? stash(renderMathHTML(tex, true)) : full));
+    }
+    if (hasBackslash && s.includes("\\(")) {
+      s = s.replace(/\\\(([^\n]+?)\\\)/g, (full, tex) => (tex.trim() ? stash(renderMathHTML(tex, false)) : full));
+    }
+    if (hasDollar && s.includes("$")) {
+      s = s.replace(/(^|[^\\$\w])\$([^$\n]+?)\$(?![\w$])/g, (full, lead, tex) => {
+        if (!looksLikeInlineMath(tex)) return full;
+        return lead + stash(renderMathHTML(tex, false));
+      });
+    }
+  }
 
-  s = s.replace(/\bfile:\/\/\/?[^\s<>()\[\]"'`,;]+/gi, (match) => {
-    const [clean, tail] = trimTrailingLinkPunct(match);
-    return stash(renderFileLinkHTML("", clean)) + tail;
-  });
+  if (s.includes("](")) {
+    s = s.replace(
+      /\[([^\]\n]+)\]\((?:<([^>\n]+)>|((?:file:\/\/\/?|[A-Za-z]:[\\/]|~[\\/]|%(?:USERPROFILE|APPDATA|LOCALAPPDATA|TEMP|TMP)%[\\/])[^)\n]+)|((?:[^()\s]|\([^()\s]*\))+))\)/g,
+      (full, label, angleTarget, pathTarget, stdTarget) => {
+        const target = (angleTarget || pathTarget || stdTarget || "").trim();
+        if (!target) return full;
+        if (isLocalPathTarget(target)) return stash(renderFileLinkHTML(label, target));
+        if (/^(?:https?:\/\/|mailto:)/i.test(target)) return stash(renderWebLinkHTML(label, target));
+        if (/^[.\w/-]+\.[A-Za-z0-9]{1,12}(?:(?:#L?\d+(?:-L?\d+)?)|(?::\d+(?:[-:]\d+)?))?$/.test(target)) {
+          return stash(`<span class="md-file-ref" title="${escAttr(target)}">${ico("file-text", "md-file-ico")}<span class="md-file-name">${esc(label)}</span></span>`);
+        }
+        return full;
+      }
+    );
+  }
 
-  s = s.replace(/\bhttps?:\/\/[^\s<>()\[\]"'`]+/gi, (match) => {
-    const [clean, tail] = trimTrailingLinkPunct(match);
-    return stash(renderWebLinkHTML(clean, clean)) + tail;
-  });
+  if (s.includes("://")) {
+    s = s.replace(/\bfile:\/\/\/?[^\s<>()\[\]"'`,;]+/gi, (match) => {
+      const [clean, tail] = trimTrailingLinkPunct(match);
+      return stash(renderFileLinkHTML("", clean)) + tail;
+    });
 
-  s = s.replace(/(^|[\s([{"'])([A-Za-z]:\\[^\s<>()\[\]"'`,;*?|]+|~[\\/][^\s<>()\[\]"'`,;*?|]+|%(?:USERPROFILE|APPDATA|LOCALAPPDATA|TEMP|TMP)%\\[^\s<>()\[\]"'`,;*?|]+)/gi, (full, lead, pathMatch) => {
-    const [clean, tail] = trimTrailingLinkPunct(pathMatch);
-    if (!isLocalPathTarget(clean)) return full;
-    return lead + stash(renderFileLinkHTML(clean, clean)) + tail;
-  });
+    s = s.replace(/\bhttps?:\/\/[^\s<>()\[\]"'`]+/gi, (match) => {
+      const [clean, tail] = trimTrailingLinkPunct(match);
+      return stash(renderWebLinkHTML(clean, clean)) + tail;
+    });
+  }
+
+  if (s.includes(":\\") || s.includes("~/") || s.includes("~\\") || s.includes("%\\")) {
+    s = s.replace(/(^|[\s([{"'])([A-Za-z]:\\[^\s<>()\[\]"'`,;*?|]+|~[\\/][^\s<>()\[\]"'`,;*?|]+|%(?:USERPROFILE|APPDATA|LOCALAPPDATA|TEMP|TMP)%\\[^\s<>()\[\]"'`,;*?|]+)/gi, (full, lead, pathMatch) => {
+      const [clean, tail] = trimTrailingLinkPunct(pathMatch);
+      if (!isLocalPathTarget(clean)) return full;
+      return lead + stash(renderFileLinkHTML(clean, clean)) + tail;
+    });
+  }
 
   s = esc(s);
-  s = s.replace(/\*\*\*([^\s*](?:[^*\n]*[^\s*])?)\*\*\*/g, "<strong><em>$1</em></strong>");
-  s = s.replace(/\*\*([^\s*](?:[^*\n]*[^\s*])?)\*\*/g, "<strong>$1</strong>");
-  s = s.replace(/(^|[^\w])__([^\s_](?:[^_\n]*[^\s_])?)__(?=[^\w]|$)/g, "$1<strong>$2</strong>");
-  s = s.replace(/~~([^\s~](?:[^~\n]*[^\s~])?)~~/g, "<del>$1</del>");
-  s = s.replace(/(^|[^*\w])\*([^\s*](?:[^*\n]*[^\s*])?)\*(?![*\w])/g, "$1<em>$2</em>");
-  s = s.replace(/(^|[^\w])_([^\s_](?:[^_\n]*[^\s_])?)_(?=[^\w]|$)/g, "$1<em>$2</em>");
+  const hasStar = s.includes("*");
+  const hasUnder = s.includes("_");
+  if (hasStar) {
+    s = s.replace(/\*\*\*([^\s*](?:[^*\n]*[^\s*])?)\*\*\*/g, "<strong><em>$1</em></strong>");
+    s = s.replace(/\*\*([^\s*](?:[^*\n]*[^\s*])?)\*\*/g, "<strong>$1</strong>");
+  }
+  if (hasUnder && s.includes("__")) {
+    s = s.replace(/(^|[^\w])__([^\s_](?:[^_\n]*[^\s_])?)__(?=[^\w]|$)/g, "$1<strong>$2</strong>");
+  }
+  if (s.includes("~~")) {
+    s = s.replace(/~~([^\s~](?:[^~\n]*[^\s~])?)~~/g, "<del>$1</del>");
+  }
+  if (hasStar && s.includes("*")) {
+    s = s.replace(/(^|[^*\w])\*([^\s*](?:[^*\n]*[^\s*])?)\*(?![*\w])/g, "$1<em>$2</em>");
+  }
+  if (hasUnder && s.includes("_")) {
+    s = s.replace(/(^|[^\w])_([^\s_](?:[^_\n]*[^\s_])?)_(?=[^\w]|$)/g, "$1<em>$2</em>");
+  }
 
+  if (!inlines.length) return s;
   return s.replace(/\x00IN(\d+)\x00/g, (tok, idx) => inlines[Number(idx)] ?? tok);
 }
 
@@ -1870,14 +2628,21 @@ function renderCodeBlockHTML(lang, rawCode) {
   const cleanCode = rawCode.replace(/\n$/, "");
   CODE_STORE.push(cleanCode);
   const lowerLang = (lang || "").toLowerCase();
-  let innerHtml = esc(cleanCode);
+  let innerHtml;
   if (lowerLang === "diff" || lowerLang === "patch") {
-    innerHtml = cleanCode.split("\n").map((ln) => {
-      if (ln.startsWith("+") && !ln.startsWith("+++")) return `<span class="cd-add">${esc(ln)}</span>`;
-      if (ln.startsWith("-") && !ln.startsWith("---")) return `<span class="cd-del">${esc(ln)}</span>`;
-      if (ln.startsWith("@@")) return `<span class="cd-hunk">${esc(ln)}</span>`;
-      return esc(ln);
-    }).join("\n");
+    const lines = cleanCode.split("\n");
+    if (lines.length > 1200) {
+      innerHtml = esc(cleanCode);
+    } else {
+      innerHtml = lines.map((ln) => {
+        if (ln.startsWith("+") && !ln.startsWith("+++")) return `<span class="cd-add">${esc(ln)}</span>`;
+        if (ln.startsWith("-") && !ln.startsWith("---")) return `<span class="cd-del">${esc(ln)}</span>`;
+        if (ln.startsWith("@@")) return `<span class="cd-hunk">${esc(ln)}</span>`;
+        return esc(ln);
+      }).join("\n");
+    }
+  } else {
+    innerHtml = esc(cleanCode);
   }
   return `<div class="code-wrap"><div class="code-head"><span>${esc(lang || "code")}</span><button class="btn sm" data-act="copy-code" data-code-idx="${idx}">${ico("copy")}<span>${esc(t("copy"))}</span></button></div><pre class="codeblock">${innerHtml}</pre></div>`;
 }
@@ -1938,9 +2703,9 @@ function fmtMarkdown(raw) {
       const len = marker.length;
       const lang = fenceOpen[2] || "";
       const codeLines = [];
+      const closeRe = new RegExp(`^ {0,3}${ch}{${len},}\\s*$`);
       li++;
       while (li < rawLines.length) {
-        const closeRe = new RegExp(`^ {0,3}${ch}{${len},}\\s*$`);
         if (closeRe.test(rawLines[li])) {
           li++;
           break;
@@ -1955,7 +2720,8 @@ function fmtMarkdown(raw) {
       preLines.push(pushBlock(renderCodeBlockHTML(lang, codeLines.join("\n"))));
       continue;
     }
-    preLines.push(rawLines[li].replace(/```([a-zA-Z0-9_+-]*)\s*([^`\n]+)```/g, (_, lang, code) => pushBlock(renderCodeBlockHTML(lang, code))));
+    const rawCur = rawLines[li];
+    preLines.push(rawCur.includes("```") ? rawCur.replace(/```([a-zA-Z0-9_+-]*)\s*([^`\n]+)```/g, (_, lang, code) => pushBlock(renderCodeBlockHTML(lang, code))) : rawCur);
     li++;
   }
 
@@ -2050,6 +2816,7 @@ function fmtMarkdown(raw) {
         if (curIndent === baseIndent && curOrdered !== isOrdered) break;
         const textPart = cm[4];
         const taskMatch = textPart.match(/^\[([ xX])\]\s+(.*)$/);
+        const isTask = !!taskMatch;
         let rendered;
         if (taskMatch) {
           const done = taskMatch[1].toLowerCase() === "x";
@@ -2058,19 +2825,20 @@ function fmtMarkdown(raw) {
           rendered = fmtInline(textPart);
         }
         if (curIndent > baseIndent && items.length) {
-          items[items.length - 1].sub.push({ ordered: curOrdered, html: rendered });
+          items[items.length - 1].sub.push({ ordered: curOrdered, html: rendered, task: isTask });
         } else {
-          items.push({ html: rendered, sub: [] });
+          items.push({ html: rendered, task: isTask, sub: [] });
         }
         i++;
       }
       const tag = isOrdered ? "ol" : "ul";
       const cls = isOrdered ? "md-list md-olist" : "md-list";
       const liHtml = items.map((it) => {
-        if (!it.sub.length) return `<li>${it.html}</li>`;
+        const liOpen = it.task ? '<li class="md-task-item">' : "<li>";
+        if (!it.sub.length) return `${liOpen}${it.html}</li>`;
         const subTag = it.sub[0].ordered ? "ol" : "ul";
         const subCls = it.sub[0].ordered ? "md-list md-olist" : "md-list";
-        return `<li>${it.html}<${subTag} class="${subCls}">${it.sub.map((s) => `<li>${s.html}</li>`).join("")}</${subTag}></li>`;
+        return `${liOpen}${it.html}<${subTag} class="${subCls}">${it.sub.map((s) => `${s.task ? '<li class="md-task-item">' : "<li>"}${s.html}</li>`).join("")}</${subTag}></li>`;
       }).join("");
       outLines.push(pushBlock(`<${tag} class="${cls}">${liHtml}</${tag}>`));
       continue;
@@ -2087,38 +2855,49 @@ function fmtMarkdown(raw) {
 
 function fmtToolText(raw) {
   if (!raw) return `<span class="empty">${esc(t("empty"))}</span>`;
+  let s = String(raw).replace(/\x00/g, "");
+  const hasFile = s.includes("://");
+  const hasQuotedPath = s.includes('"') && (s.includes(":\\") || s.includes(":/"));
+  const hasPath = s.includes(":\\") || s.includes("~/") || s.includes("~\\");
+  if (!hasFile && !hasQuotedPath && !hasPath) return esc(s);
   const tokens = [];
   const stash = (html) => {
     const id = tokens.length;
     tokens.push(html);
     return `\x00TP${id}\x00`;
   };
-  let s = String(raw).replace(/\x00/g, "");
 
-  s = s.replace(/\bfile:\/\/\/?[^\s<>()\[\]"'`,;]+/gi, (match) => {
-    const [clean, tail] = trimTrailingLinkPunct(match);
-    const info = decodePathDisplay(clean);
-    const tip = `${t("reveal_in_explorer")}: ${info.displayPath}`;
-    return stash(`<a class="md-tool-path" href="#reveal" data-reveal-path="${escAttr(clean)}" title="${escAttr(tip)}">${esc(clean)}</a>`) + tail;
-  });
+  if (hasFile) {
+    s = s.replace(/\bfile:\/\/\/?[^\s<>()\[\]"'`,;]+/gi, (match) => {
+      const [clean, tail] = trimTrailingLinkPunct(match);
+      const info = decodePathDisplay(clean);
+      const tip = `${t("reveal_in_explorer")}: ${info.displayPath}`;
+      return stash(`<a class="md-tool-path" href="#reveal" data-reveal-path="${escAttr(clean)}" title="${escAttr(tip)}">${esc(clean)}</a>`) + tail;
+    });
+  }
 
-  s = s.replace(/"([A-Za-z]:(?:\\\\|\\|\/)[^"\r\n]+)"/g, (full, inner) => {
-    const unescaped = inner.replace(/\\\\/g, "\\");
-    if (!isLocalPathTarget(unescaped)) return full;
-    const info = decodePathDisplay(unescaped);
-    const tip = `${t("reveal_in_explorer")}: ${info.displayPath}`;
-    return `"${stash(`<a class="md-tool-path" href="#reveal" data-reveal-path="${escAttr(unescaped)}" title="${escAttr(tip)}">${esc(inner)}</a>`)}"`;
-  });
+  if (hasQuotedPath) {
+    s = s.replace(/"([A-Za-z]:(?:\\\\|\\|\/)[^"\r\n]+)"/g, (full, inner) => {
+      const unescaped = inner.replace(/\\\\/g, "\\");
+      if (!isLocalPathTarget(unescaped)) return full;
+      const info = decodePathDisplay(unescaped);
+      const tip = `${t("reveal_in_explorer")}: ${info.displayPath}`;
+      return `"${stash(`<a class="md-tool-path" href="#reveal" data-reveal-path="${escAttr(unescaped)}" title="${escAttr(tip)}">${esc(inner)}</a>`)}"`;
+    });
+  }
 
-  s = s.replace(/(^|[\s([{'=:])([A-Za-z]:\\[^\s<>()\[\]"'`,;*?|]+|~[\\/][^\s<>()\[\]"'`,;*?|]+)/g, (full, lead, pathMatch) => {
-    const [clean, tail] = trimTrailingLinkPunct(pathMatch);
-    if (!isLocalPathTarget(clean)) return full;
-    const info = decodePathDisplay(clean);
-    const tip = `${t("reveal_in_explorer")}: ${info.displayPath}`;
-    return lead + stash(`<a class="md-tool-path" href="#reveal" data-reveal-path="${escAttr(clean)}" title="${escAttr(tip)}">${esc(clean)}</a>`) + tail;
-  });
+  if (hasPath) {
+    s = s.replace(/(^|[\s([{'=:])([A-Za-z]:\\[^\s<>()\[\]"'`,;*?|]+|~[\\/][^\s<>()\[\]"'`,;*?|]+)/g, (full, lead, pathMatch) => {
+      const [clean, tail] = trimTrailingLinkPunct(pathMatch);
+      if (!isLocalPathTarget(clean)) return full;
+      const info = decodePathDisplay(clean);
+      const tip = `${t("reveal_in_explorer")}: ${info.displayPath}`;
+      return lead + stash(`<a class="md-tool-path" href="#reveal" data-reveal-path="${escAttr(clean)}" title="${escAttr(tip)}">${esc(clean)}</a>`) + tail;
+    });
+  }
 
   s = esc(s);
+  if (!tokens.length) return s;
   return s.replace(/\x00TP(\d+)\x00/g, (tok, idx) => tokens[Number(idx)] ?? tok);
 }
 
@@ -2152,7 +2931,7 @@ function feedSkeleton() {
 }
 
 const SELECT_SCOPE = ".codeblock, .md-math.is-display, .md-table-wrap, .tool-body, .msg-body, .report-body, .preview-text, .diff-box, .unlocker-body, .rep-card";
-const COPY_CHROME = "button, .code-head, .msg-actions, .clamp-bar, .md-file-ico, .md-path-ico, .md-link-ext, .prov-path-ico, .md-callout-head svg, svg.ico";
+const COPY_CHROME = "button, .code-head, .msg-actions, .clamp-bar, .md-expand-bar, .md-file-ico, .md-path-ico, .md-link-ext, .prov-path-ico, .md-callout-head svg, svg.ico";
 let lastPointerTarget = null;
 
 function selectionTouches(el) {
@@ -2287,8 +3066,11 @@ window.addEventListener("k1tty:selectall", () => {
 });
 
 let textMenuActions = [];
+let textMenuOpen = false;
 
 function closeTextMenu() {
+  if (!textMenuOpen) return;
+  textMenuOpen = false;
   const menu = $("#textMenu");
   if (!menu || menu.classList.contains("hidden")) return;
   menu.classList.add("hidden");
@@ -2347,11 +3129,12 @@ function buildTextMenu(target) {
     const g = [];
     const body = block.querySelector(".msg-body, .tool-body");
     if (body) g.push({ icon: "text-select", label: t("tm_select_msg"), run: () => {
+      hydrateToolBlock(block);
       const details = block.querySelector("details");
       if (details && !details.open) details.open = true;
       selectNodeContents(body);
     } });
-    const rawText = block.__k1ttyItem?.text;
+    const rawText = block.__k1ttyFullText ?? block.__k1ttyItem?.text;
     if (rawText) g.push({ icon: "clipboard", label: t("tm_copy_msg"), run: () => copyPlainText(rawText) });
     if (g.length) groups.push(g);
   }
@@ -2380,6 +3163,7 @@ function openTextMenu(x, y, groups) {
   });
   menu.innerHTML = parts.join("");
   menu.classList.remove("hidden");
+  textMenuOpen = true;
   const mw = menu.offsetWidth || 220;
   const mh = menu.offsetHeight || 160;
   menu.style.left = Math.max(8, Math.min(x, window.innerWidth - mw - 8)) + "px";
@@ -2404,11 +3188,11 @@ $("#textMenu")?.addEventListener("click", (ev) => {
   closeTextMenu();
   action?.run();
 });
-document.addEventListener("mousedown", (ev) => { if (!ev.target.closest("#textMenu")) closeTextMenu(); }, true);
-document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") closeTextMenu(); });
+document.addEventListener("mousedown", (ev) => { if (textMenuOpen && !ev.target.closest("#textMenu")) closeTextMenu(); }, true);
+document.addEventListener("keydown", (ev) => { if (textMenuOpen && ev.key === "Escape") closeTextMenu(); });
 window.addEventListener("blur", closeTextMenu);
 window.addEventListener("resize", closeTextMenu);
-document.addEventListener("scroll", closeTextMenu, true);
+document.addEventListener("scroll", () => { if (textMenuOpen) closeTextMenu(); }, { capture: true, passive: true });
 
 const STATE = {
   providers: {},
@@ -2548,6 +3332,8 @@ $("#ovBkGrid")?.addEventListener("click", (ev) => {
   if (!card) return;
   openBackups(card.dataset.bkProv, null);
 });
+$("#ovGenerateBtn")?.addEventListener("click", () => openGenerateModal());
+$("#generateQuickBtn")?.addEventListener("click", () => openGenerateModal());
 $("#ovImportBtn").onclick = () => openImportModal();
 $("#importQuickBtn").onclick = () => openImportModal();
 $("#winterBtn")?.addEventListener("click", () => {
@@ -2611,7 +3397,7 @@ function renderSidebar() {
       const isSel = multiSelectMode && selectedConvKeys.has(key);
       const pinIco = isPinned(r.provider, r.cid) ? ico("pin", "conv-pin-ico") : "";
       return `
-        <div class="conv-item${isAct ? " active" : ""}${isSel ? " is-selected" : ""}" data-prov="${esc(r.provider)}" data-cid="${esc(r.cid)}" data-hit-key="${esc(r.key || "")}" role="button" tabindex="0">
+        <div class="conv-item${isAct ? " active" : ""}${isSel ? " is-selected" : ""}" data-prov="${esc(r.provider)}" data-cid="${esc(r.cid)}" data-hit-key="${esc(r.key || "")}" data-hit-kind="${esc(r.kind || "")}" role="button" tabindex="0">
           ${multiSelectMode ? `<span class="conv-check" aria-hidden="true">${ico("check")}</span>` : ""}
           <span class="conv-ico">${aiImg(r.provider)}</span>
           <div class="conv-info">
@@ -2629,6 +3415,7 @@ function renderSidebar() {
     }).join("");
     syncSidebarSelection();
     syncBatchBar();
+    convListScrollbar?.update();
     return;
   }
 
@@ -2681,6 +3468,7 @@ function renderSidebar() {
   }).join("");
   syncSidebarSelection();
   syncBatchBar();
+  convListScrollbar?.update();
 }
 
 function syncSidebarSelection() {
@@ -2944,13 +3732,19 @@ function renderOverview() {
         </button>`;
     }).join("") || `<p class="ov-backup-empty">${esc(t("stat_backups_empty"))}</p>`;
   }
+  overviewScrollbar?.update();
 }
 
 function showOverview() {
-   
   STATE.loadingThreadToken++;
+  threadJumpSeq++;
   resetThreadTransition();
   STATE.active = null;
+  const feed = $("#chatFeed");
+  if (feed) feed.innerHTML = "";
+  CODE_STORE.length = 0;
+  lastPointerTarget = null;
+  document.body.classList.remove("view-chat");
   if (WS_READY) rpc("set_view", "all", {}).catch(() => {});
   history.replaceState(null, "", "#");
   $("#overviewPane").classList.remove("hidden");
@@ -3059,14 +3853,14 @@ $("#ctxMenu").addEventListener("click", (ev) => {
     window.K1ttyDesktop.writeText(cid).then(() => toast(t("toast_id_copied"), "ok"));
   } else if (action === "lock-chat") {
     closeCtxMenu();
-    if (!guardNotRunning(provider)) return;
+    if (!guardNotRunning(provider, cid)) return;
     openLockModal(provider, cid);
   } else if (action === "system-notices") {
     closeCtxMenu();
     openNoticeModal(provider, cid);
   } else if (action === "delete-conv") {
     ev.stopPropagation();
-    if (!guardNotRunning(provider)) { closeCtxMenu(); return; }
+    if (!guardNotRunning(provider, cid)) { closeCtxMenu(); return; }
     handleArmedClick(btn, t("confirm_delete"), () => executeDeleteConv(provider, cid, el));
   }
 });
@@ -3145,6 +3939,145 @@ function actionsBarHTML(it) {
   return `<div class="msg-actions">${btns.join("")}</div>`;
 }
 
+const DISPLAY_TRUNC_LIMIT = 16000;
+const MSG_PREVIEW_CHARS = 6000;
+const TOOL_PREVIEW_CHARS = 8000;
+const LARGE_PLAIN_LIMIT = 150000;
+
+function isThinkingItem(it) {
+  if (!it) return false;
+  return String(it.subtype || "").toLowerCase() === "thinking"
+    || String(it.tool || "").toLowerCase() === "thinking"
+    || String(it.label || "").toLowerCase() === "reasoning";
+}
+
+function slicePlainPreview(text, maxChars) {
+  const s = String(text || "");
+  if (s.length <= maxChars) return s;
+  let end = maxChars;
+  const code = s.charCodeAt(end - 1);
+  if (code >= 0xD800 && code <= 0xDBFF) end--;
+  const nl = s.lastIndexOf("\n", end);
+  if (nl > end - 240 && nl > maxChars * 0.7) end = nl;
+  return s.slice(0, end);
+}
+
+function closeDanglingFence(text) {
+  const lines = String(text || "").split("\n");
+  let fenceChar = "";
+  let fenceLen = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const ln = lines[i];
+    if (!fenceChar) {
+      const m = ln.match(/^ {0,3}(`{3,}|~{3,})\s*[a-zA-Z0-9_+#.-]*\s*$/);
+      if (m) {
+        fenceChar = m[1][0];
+        fenceLen = m[1].length;
+      }
+    } else {
+      const m = ln.match(/^ {0,3}(`{3,}|~{3,})\s*$/);
+      if (m && m[1][0] === fenceChar && m[1].length >= fenceLen) {
+        fenceChar = "";
+        fenceLen = 0;
+      }
+    }
+  }
+  return fenceChar ? `${text}\n${fenceChar.repeat(fenceLen)}` : text;
+}
+
+function sliceMarkdownPreview(text, maxChars) {
+  return closeDanglingFence(slicePlainPreview(text, maxChars));
+}
+
+function expandBarHTML(fullBytes) {
+  return `<div class="md-expand-bar"><span class="md-expand-note">${esc(t("truncated_notice"))}</span><button type="button" class="btn sm" data-act="expand-full">${ico("chev-down")}<span>${esc(t("expand_full_btn", { size: fmtSize(fullBytes) }))}</span></button></div>`;
+}
+
+function hydrateToolBlock(el, { highlight = true } = {}) {
+  if (!el) return;
+  const body = el.querySelector(".tool-body[data-lazy-tool]");
+  if (!body) return;
+  body.removeAttribute("data-lazy-tool");
+  const it = el.__k1ttyItem;
+  if (!it) return;
+  const isThinking = isThinkingItem(it) || body.classList.contains("is-markdown");
+  const rawText = el.__k1ttyFullText ?? it.text ?? "";
+  const truncated = el.__k1ttyFullText == null && (it.text_truncated === true || rawText.length > DISPLAY_TRUNC_LIMIT);
+  if (truncated) {
+    const preview = isThinking
+      ? sliceMarkdownPreview(rawText, TOOL_PREVIEW_CHARS)
+      : slicePlainPreview(rawText, TOOL_PREVIEW_CHARS);
+    const fullSize = Number(it.full_bytes) || rawText.length;
+    body.dataset.truncated = "1";
+    body.innerHTML = (isThinking ? fmtMarkdown(preview) : fmtToolText(preview)) + expandBarHTML(fullSize);
+  } else if (rawText.length > LARGE_PLAIN_LIMIT) {
+    body.innerHTML = `<pre class="md-large-plain">${esc(rawText)}</pre>`;
+  } else {
+    body.innerHTML = isThinking ? fmtMarkdown(rawText) : fmtToolText(rawText);
+  }
+  if (highlight && typeof applyThreadSearchHighlights === "function") {
+    const findBar = $("#threadSearchBar");
+    if (findBar && !findBar.classList.contains("hidden")) {
+      applyThreadSearchHighlights($("#threadSearchInput")?.value || "", threadFindWholeWord, activeFindEl);
+    }
+  }
+}
+
+async function expandFullBlock(btn) {
+  const block = btn?.closest(".msg-block, .notice-block, .tool-block");
+  if (!block || !STATE.active) return;
+  const it = block.__k1ttyItem;
+  if (!it) return;
+  const activeCtx = STATE.active;
+  const isTool = block.classList.contains("tool-block");
+  const body = block.querySelector(isTool ? ".tool-body" : ".msg-body");
+  if (!body) return;
+  const origHtml = btn.innerHTML;
+  let fullText = block.__k1ttyFullText;
+  if (fullText == null) {
+    if (it.text_truncated) {
+      btn.disabled = true;
+      btn.innerHTML = `${ico("loader", "spin")}<span>${esc(t("loading_full_btn"))}</span>`;
+      try {
+        const payload = activeCtx.readonlyBackup
+          ? { backup_dir: activeCtx.backupDir, cid: activeCtx.id, key: it.key }
+          : { cid: activeCtx.id, key: it.key };
+        const res = await rpc("entry_text", activeCtx.provider, payload);
+        if (!block.isConnected || STATE.active !== activeCtx) return;
+        fullText = typeof res === "string" ? res : (res?.text ?? it.text ?? "");
+        block.__k1ttyFullText = fullText;
+      } catch (e) {
+        if (btn.isConnected) {
+          btn.disabled = false;
+          btn.innerHTML = origHtml;
+        }
+        toast(e?.message || String(e), "err");
+        return;
+      }
+    } else {
+      fullText = it.text || "";
+      block.__k1ttyFullText = fullText;
+    }
+  }
+  if (!block.isConnected || STATE.active !== activeCtx) return;
+  const isMarkdown = !isTool || body.classList.contains("is-markdown") || isThinkingItem(it);
+  if (fullText.length > LARGE_PLAIN_LIMIT) {
+    body.innerHTML = `<pre class="md-large-plain">${esc(fullText)}</pre>`;
+  } else {
+    body.innerHTML = isMarkdown ? fmtMarkdown(fullText) : fmtToolText(fullText);
+  }
+  body.removeAttribute("data-truncated");
+  body.classList.remove("clamped");
+  btn.closest(".md-expand-bar")?.remove();
+  if (typeof applyThreadSearchHighlights === "function") {
+    const findBar = $("#threadSearchBar");
+    if (findBar && !findBar.classList.contains("hidden")) {
+      applyThreadSearchHighlights($("#threadSearchInput")?.value || "", threadFindWholeWord, activeFindEl);
+    }
+  }
+  feedScrollbar?.update();
+}
+
 function renderItemHTML(it, provId) {
   const k = esc(it.key);
   const meta = PROV[provId] || { name: "AI" };
@@ -3153,8 +4086,14 @@ function renderItemHTML(it, provId) {
     const isUser = it.kind === "user";
     const who = isUser ? t("you") : meta.name;
     const chip = isUser ? ico("user") : aiImg(provId);
-    const long = (it.text || "").length > (isUser ? 900 : 2400);
+    const rawText = it.text || "";
+    const truncated = it.text_truncated === true || rawText.length > DISPLAY_TRUNC_LIMIT;
+    const long = !truncated && rawText.length > (isUser ? 900 : 2400);
     const ghost = it.in_db === false;
+    const bodyHtml = truncated
+      ? fmtMarkdown(sliceMarkdownPreview(rawText, MSG_PREVIEW_CHARS))
+      : fmtMarkdown(rawText);
+    const fullSize = Number(it.full_bytes) || rawText.length;
     return `
       <article class="msg-block kind-${it.kind}${ghost ? " ghost" : ""}" data-key="${k}">
         <div class="msg-head">
@@ -3164,8 +4103,9 @@ function renderItemHTML(it, provId) {
           ${it.ts ? `<span class="msg-time">${fmtTime(it.ts)}</span>` : ""}
           ${ghost ? `<span class="mono-tag warn">${esc(t("transcript_only"))}</span>` : ""}
         </div>
-        <div class="msg-body${long ? " clamped" : ""}">${fmtMarkdown(it.text)}</div>
+        <div class="msg-body${long ? " clamped" : ""}"${truncated ? ' data-truncated="1"' : ""}>${bodyHtml}</div>
         ${long ? `<div class="clamp-bar"><button class="btn sm" data-act="clamp">${ico("chev-down")}<span>${esc(t("show_more"))}</span></button></div>` : ""}
+        ${truncated ? expandBarHTML(fullSize) : ""}
         ${actionsBarHTML(it)}
       </article>`;
   }
@@ -3174,10 +4114,7 @@ function renderItemHTML(it, provId) {
     const iconName = toolIconFor(it);
     const isErr = String(it.status || "").toLowerCase() === "error";
     const name = localizeKind(it.label || it.tool || t("tool"));
-    const isThinking = String(it.subtype || "").toLowerCase() === "thinking"
-      || String(it.tool || "").toLowerCase() === "thinking"
-      || String(it.label || "").toLowerCase() === "reasoning";
-    const bodyHtml = isThinking ? fmtMarkdown(it.text) : fmtToolText(it.text);
+    const isThinking = isThinkingItem(it);
     return `
       <div class="tool-block${isErr ? " is-error" : ""}" data-key="${k}">
         <details>
@@ -3189,7 +4126,7 @@ function renderItemHTML(it, provId) {
             <span class="spacer"></span>
             ${it.ts ? `<span class="msg-time">${fmtTime(it.ts)}</span>` : ""}
           </summary>
-          <div class="tool-body${isThinking ? " is-markdown" : ""}">${bodyHtml}</div>
+          <div class="tool-body${isThinking ? " is-markdown" : ""}" data-lazy-tool="1"></div>
           ${actionsBarHTML(it)}
         </details>
       </div>`;
@@ -3199,7 +4136,13 @@ function renderItemHTML(it, provId) {
   const noticeType = provId === "claude" && ["info", "notice", "suggestion", "warning", "safety_classifier"].includes(it.notice_type) ? it.notice_type : "";
   const isGuard = noticeType === "safety_classifier" || (!noticeType && it.subtype === "safeguard");
   const iconName = isErr ? "alert" : (isGuard ? "shield" : noticeType === "warning" ? "warn" : "info");
-  const long = (it.text || "").length > 900;
+  const rawText = it.text || "";
+  const truncated = it.text_truncated === true || rawText.length > DISPLAY_TRUNC_LIMIT;
+  const long = !truncated && rawText.length > 900;
+  const bodyHtml = truncated
+    ? fmtMarkdown(sliceMarkdownPreview(rawText, MSG_PREVIEW_CHARS))
+    : fmtMarkdown(rawText);
+  const fullSize = Number(it.full_bytes) || rawText.length;
   const noticeTitle = noticeType
     ? noticeType === "safety_classifier" ? t("notices_safety_label") : t("notices_" + noticeType)
     : isErr ? localizeUnlockerCategory(localizeKind(it.label || t("error"))) : localizeKind(it.label || t("system"));
@@ -3211,8 +4154,9 @@ function renderItemHTML(it, provId) {
         ${it.code ? `<span class="mono-tag">${esc(it.code)}</span>` : ""}
         ${it.ts ? `<span class="msg-time">${fmtTime(it.ts)}</span>` : ""}
       </div>
-      <div class="msg-body${long ? " clamped" : ""}">${fmtMarkdown(it.text)}</div>
+      <div class="msg-body${long ? " clamped" : ""}"${truncated ? ' data-truncated="1"' : ""}>${bodyHtml}</div>
       ${long ? `<div class="clamp-bar"><button class="btn sm" data-act="clamp">${ico("chev-down")}<span>${esc(t("show_more"))}</span></button></div>` : ""}
+      ${truncated ? expandBarHTML(fullSize) : ""}
       ${actionsBarHTML(it)}
     </article>`;
 }
@@ -3264,6 +4208,8 @@ function isConvLocked(provId, cid = null) {
       if (STATE.active.liveUnlocked) return false;
     }
   }
+  const isAg = provId === "antigravity" || provId === "antigravity_cli";
+  if (isAg && STATE.settings?.auto_restart_hub === true) return false;
   return !!STATE.providers[provId]?.blocked;
 }
 
@@ -3528,6 +4474,23 @@ $("#threadStatusBtn").onclick = () => {
  
  
 let threadTransitionTimer = null;
+let contextLoadingGuard = false;
+let contextLoadingGuardTimer = 0;
+function releaseContextLoadingGuard() {
+  if (contextLoadingGuardTimer) {
+    clearTimeout(contextLoadingGuardTimer);
+    contextLoadingGuardTimer = 0;
+  }
+  if (typeof window === "undefined") {
+    contextLoadingGuard = false;
+    return;
+  }
+  contextLoadingGuardTimer = setTimeout(() => {
+    contextLoadingGuardTimer = 0;
+    contextLoadingGuard = false;
+  }, 120);
+}
+const feedRowMap = new Map();
 let transcriptRenderSequence = 0;
 let transcriptEntryAnimation = null;
 const transcriptMutations = new Set();
@@ -3572,11 +4535,17 @@ function resetThreadTransition() {
   if (STATE.active) STATE.active.loading = false;
   $("#toggleSysBtn")?.removeAttribute("aria-busy");
   updateThreadNoticesBtn();
+  releaseContextLoadingGuard();
 }
 function beginThreadTransition(token, { update = false } = {}) {
   transcriptEntryAnimation?.cancel();
   transcriptEntryAnimation = null;
   if (threadTransitionTimer !== null) clearTimeout(threadTransitionTimer);
+  if (contextLoadingGuardTimer) {
+    clearTimeout(contextLoadingGuardTimer);
+    contextLoadingGuardTimer = 0;
+  }
+  contextLoadingGuard = true;
   const wrap = $("#chatWrap");
   wrap?.setAttribute("aria-busy", "true");
   wrap?.setAttribute("data-loading-kind", update ? "update" : "open");
@@ -3603,17 +4572,28 @@ function transcriptItems(turns) {
   return (turns || []).flatMap((turn) => turn.items || []);
 }
 
+function hashTranscriptText(str) {
+  let h1 = 0x811c9dc5;
+  let h2 = 0x9e3779b9;
+  const len = str.length;
+  for (let i = 0; i < len; i++) {
+    const c = str.charCodeAt(i);
+    h1 ^= c;
+    h1 = Math.imul(h1, 0x01000193);
+    h2 ^= (c + i) & 0xffff;
+    h2 = Math.imul(h2, 0x85ebca6b);
+  }
+  return `${len}:${(h1 >>> 0).toString(36)}:${(h2 >>> 0).toString(36)}`;
+}
+
 function transcriptIdentity(item) {
-   
-   
-  return JSON.stringify([item.kind, item.ts || "", item.text || "", item.tool || ""]);
+  const text = item.text || "";
+  return `${item.kind || ""}\x1f${item.ts || ""}\x1f${item.tool || ""}\x1f${hashTranscriptText(text)}`;
 }
 
 function sameTranscriptItem(previous, next) {
   if (!previous) return false;
-   
-   
-  for (const key of ["key", "kind", "text", "tool", "label", "subtype", "notice_type", "level", "status", "code", "ts", "in_db"]) {
+  for (const key of ["key", "kind", "text", "tool", "label", "subtype", "notice_type", "level", "status", "code", "ts", "in_db", "text_truncated", "full_bytes"]) {
     if (previous[key] !== next[key]) return false;
   }
   const a = previous.actions || [], b = next.actions || [];
@@ -3638,9 +4618,9 @@ function animateTranscriptEntry() {
   const scroll = $("#feedScroll");
   if (typeof scroll?.animate !== "function") return;
   const animation = scroll.animate([
-    { opacity: .94, transform: "translateY(3px)" },
+    { opacity: 0.01, transform: "translateY(7px)" },
     { opacity: 1, transform: "translateY(0)" },
-  ], { duration: 160, easing: "cubic-bezier(.2,.7,.2,1)" });
+  ], { duration: 210, easing: "cubic-bezier(0.22, 1, 0.36, 1)" });
   transcriptEntryAnimation = animation;
    
    
@@ -3719,7 +4699,7 @@ function restoreTranscriptAnchor(anchor) {
   scroll.scrollTop = anchor.top;
 }
 
-async function commitThreadTranscript(token, turns, hasMore, { preserve = false } = {}) {
+async function commitThreadTranscript(token, turns, hasMore, { preserve = false, scrollMode } = {}) {
   if (token !== STATE.loadingThreadToken) return false;
   const context = STATE.active;
   const language = CUR_LANG;
@@ -3790,39 +4770,59 @@ async function commitThreadTranscript(token, turns, hasMore, { preserve = false 
    
    
   for (const { old, next } of stateTransfers) {
-    if (old.querySelector("details[open]")) next.querySelector("details")?.setAttribute("open", "");
+    if (old.querySelector("details[open]")) {
+      next.querySelector("details")?.setAttribute("open", "");
+      if (typeof hydrateToolBlock === "function") hydrateToolBlock(next);
+    }
     if (old.querySelector(".clamp-bar") && !old.querySelector(".msg-body.clamped")) {
       next.querySelector(".msg-body")?.classList.remove("clamped");
       const clamp = next.querySelector('[data-act="clamp"]');
       if (clamp) clamp.innerHTML = `${ico("chev-up")}<span>${esc(t("collapse"))}</span>`;
     }
   }
-   
-   
-   
-   
   const anchor = preserve ? captureTranscriptAnchor() : null;
-   
-   
-  const keep = new Set(nextRows);
-  for (const row of Array.from(feed.children)) if (!keep.has(row)) row.remove();
-  let cursor = feed.firstElementChild;
-  for (const next of nextRows) {
-    if (next === cursor) cursor = cursor.nextElementSibling;
-    else feed.insertBefore(next, cursor);
-  }
-  while (cursor) {
-    const next = cursor.nextElementSibling;
-    cursor.remove();
-    cursor = next;
+  if (!preserve && typeof document.createDocumentFragment === "function") {
+    feed.textContent = "";
+    const frag = document.createDocumentFragment();
+    for (const next of nextRows) frag.appendChild(next);
+    feed.appendChild(frag);
+  } else {
+    const keep = new Set(nextRows);
+    for (const row of Array.from(feed.children)) if (!keep.has(row)) row.remove();
+    let cursor = feed.firstElementChild;
+    for (const next of nextRows) {
+      if (next === cursor) cursor = cursor.nextElementSibling;
+      else feed.insertBefore(next, cursor);
+    }
+    while (cursor) {
+      const next = cursor.nextElementSibling;
+      cursor.remove();
+      cursor = next;
+    }
   }
   feed.classList.remove("thread-swap-preparing");
+  feedRowMap.clear();
+  for (const next of nextRows) {
+    if (next.dataset?.key) feedRowMap.set(next.dataset.key, next);
+  }
+  if (typeof applyThreadSearchHighlights === "function") {
+    const findBar = $("#threadSearchBar");
+    if (findBar && !findBar.classList.contains("hidden")) {
+      applyThreadSearchHighlights($("#threadSearchInput")?.value || "", threadFindWholeWord, activeFindEl);
+    }
+  }
   renderMoreBar(hasMore);
-  if (preserve) restoreTranscriptAnchor(anchor);
-  else scroll.scrollTop = scroll.scrollHeight;
+  const resolvedScroll = scrollMode ?? (preserve ? "preserve" : "bottom");
+  if (resolvedScroll === "preserve") restoreTranscriptAnchor(anchor);
+  else if (resolvedScroll === "bottom") {
+    contextLoadingGuard = true;
+    scroll.scrollTop = scroll.scrollHeight;
+    releaseContextLoadingGuard();
+  }
   updateScrollBtn();
+  if (typeof feedScrollbar !== "undefined") feedScrollbar?.update();
   if (STATE.active) STATE.active.hasRendered = true;
-  if (!preserve) animateTranscriptEntry();
+  if (!preserve && items.length <= 80) animateTranscriptEntry();
   return true;
 }
 
@@ -3868,17 +4868,20 @@ function rememberTranscript(context, showSys, response) {
   context.renderedShowSys = showSys;
 }
 
-async function applyTranscriptResponse(response, { preserve = false, showSys = STATE.showSys } = {}) {
+async function applyTranscriptResponse(response, { preserve = false, showSys = STATE.showSys, scrollMode, windowKey } = {}) {
   const active = STATE.active;
   const token = STATE.loadingThreadToken;
   if (!active) return false;
-  if (!await commitThreadTranscript(token, response.turns || [], !!response.has_more, { preserve })) return false;
+  if (!await commitThreadTranscript(token, response.turns || [], !!response.has_more, { preserve, scrollMode })) return false;
   if (active !== STATE.active || token !== STATE.loadingThreadToken) return false;
   STATE.cursor = response.cursor;
   STATE.loadedMsgs = response.page_msgs || 0;
   active.lastTurns = response.turns || [];
   active.needsRefresh = false;
   active.hasMore = !!response.has_more;
+  active.hasNewer = !!response.has_newer;
+  active.windowKey = active.hasNewer ? (windowKey || active.windowKey || null) : null;
+  if (typeof renderNewerBar === "function") renderNewerBar(active.hasNewer);
   active.totalLabel = response.total_label || "";
   if (!active.readonlyBackup) {
     active.writable = response.writable !== false;
@@ -3911,11 +4914,26 @@ async function refreshCurrentTranscript({ filterOnly = false, force = false } = 
   beginThreadTransition(token, { update: !!context.hasRendered });
   if (filterOnly) $("#toggleSysBtn").setAttribute("aria-busy", "true");
   try {
-    const response = cached && (cached.page_msgs >= (STATE.loadedMsgs || 0) || !cached.has_more)
+    const anchorKey = context.hasNewer && !context.readonlyBackup ? context.windowKey : null;
+    let response = cached && (cached.page_msgs >= (STATE.loadedMsgs || 0) || !cached.has_more)
       ? cached
-      : await readTranscriptRange(context, showSys, targetMessages, token);
+      : null;
+    if (!response) {
+      response = anchorKey
+        ? await rpc("entries", context.provider, {
+            cid: context.id,
+            around_key: String(anchorKey),
+            limit: Math.min(150, targetMessages),
+            include_tools: showSys,
+          })
+        : await readTranscriptRange(context, showSys, targetMessages, token);
+    }
     if (!response || token !== STATE.loadingThreadToken || STATE.active !== context) return;
-    await applyTranscriptResponse(response, { preserve: !!context.hasRendered, showSys });
+    await applyTranscriptResponse(response, {
+      preserve: !!context.hasRendered,
+      showSys,
+      windowKey: response.has_newer ? anchorKey : null,
+    });
   } catch (error) {
     if (token !== STATE.loadingThreadToken || STATE.active !== context) return;
     STATE.showSys = previouslyShown;
@@ -3950,11 +4968,13 @@ async function openThread(provider, cid, { preserveSys = true } = {}) {
   if (!preserveSys) STATE.showSys = false;
 
   const token = ++STATE.loadingThreadToken;
+  threadJumpSeq++;
   history.replaceState(null, "", `#${provider}/${encodeURIComponent(cid)}`);
   if (isMobile()) toggleDrawer(false);
 
   $("#overviewPane").classList.add("hidden");
   $("#chatWrap").classList.remove("hidden");
+  document.body.classList.add("view-chat");
   $("#backupBanner").classList.add("hidden");
 
   const badge = $("#threadProvBadge");
@@ -3972,11 +4992,17 @@ async function openThread(provider, cid, { preserveSys = true } = {}) {
   $("#threadReloadBtn").classList.remove("hidden");
   $("#threadFindBtn")?.classList.remove("hidden");
   closeThreadSearch();
+  renderNewerBar(false);
   $("#topThreadSep").classList.remove("hidden");
   $("#threadLockBtn").classList.toggle("hidden", provider !== "codex");
   updateThreadNoticesBtn();
+  lastContextStats = null;
+  const tokPill = $("#threadTokenPill");
+  if (tokPill) {
+    tokPill.classList.add("hidden");
+    tokPill.classList.remove("is-warn", "is-heavy");
+  }
   syncOptionalHeaderTools();
-  loadContextStats(provider, cid, token);
   hideUnlockerCard();
   syncSysButton();
   refreshStatusBadge();
@@ -3986,7 +5012,13 @@ async function openThread(provider, cid, { preserveSys = true } = {}) {
   try {
     const r = await rpc("entries", provider, { cid, limit: 80, include_tools: STATE.showSys });
     if (token !== STATE.loadingThreadToken) return;
-    await applyTranscriptResponse(r);
+    const applied = await applyTranscriptResponse(r);
+    if (applied && token === STATE.loadingThreadToken && STATE.active?.provider === provider && STATE.active?.id === cid) {
+      const prefs = window.K1ttyAppearance?.getSettings?.();
+      if (!prefs || prefs.showTokenCounter !== false) {
+        loadContextStats(provider, cid, token);
+      }
+    }
   } catch (e) {
     if (token !== STATE.loadingThreadToken) return;
     await commitThreadTranscript(token, `<div class="note err">${ico("alert")}<span>${esc(e.message)}</span></div>`, false);
@@ -4019,11 +5051,13 @@ async function openBackupResearch(provider, backupDir, backupName, title, { pres
   if (!preserveSys) STATE.showSys = false;
 
   const token = ++STATE.loadingThreadToken;
+  threadJumpSeq++;
   closeModal("bkModal");
   if (isMobile()) toggleDrawer(false);
 
   $("#overviewPane").classList.add("hidden");
   $("#chatWrap").classList.remove("hidden");
+  document.body.classList.add("view-chat");
   $("#backupBanner").classList.remove("hidden");
   $("#backupBannerName").textContent = backupName || "";
   syncRunningGuard();
@@ -4086,12 +5120,48 @@ function renderMoreBar(hasMore) {
   }
 }
 
+function renderNewerBar(hasNewer) {
+  const nw = $("#newerWrap");
+  if (!nw) return;
+  if (hasNewer) {
+    nw.classList.remove("hidden");
+    nw.innerHTML = `<button class="btn" id="jumpLatestBtn">${ico("arrow-down")}<span>${esc(t("jump_latest"))}</span></button>`;
+    $("#jumpLatestBtn").onclick = jumpToLatestMessages;
+  } else {
+    nw.classList.add("hidden");
+    nw.innerHTML = "";
+  }
+}
+
+async function jumpToLatestMessages() {
+  const context = STATE.active;
+  if (!context || context.loading || context.paging || transcriptMutationPending(context)) return;
+  const token = ++STATE.loadingThreadToken;
+  const showSys = STATE.showSys;
+  context.paging = true;
+  beginThreadTransition(token, { update: true });
+  try {
+    const r = await requestTranscriptPage(context, showSys, null);
+    if (token !== STATE.loadingThreadToken || STATE.active !== context) return;
+    await applyTranscriptResponse(r, { preserve: false, showSys, scrollMode: "bottom" });
+    if (typeof feedScrollbar !== "undefined") feedScrollbar?.update();
+  } catch (e) {
+    if (token === STATE.loadingThreadToken && STATE.active === context) {
+      toast(e.message, "err");
+    }
+  } finally {
+    context.paging = false;
+    finishThreadTransition(token);
+  }
+}
+
 async function loadMore() {
   const context = STATE.active;
   if (!context || context.loading || context.paging || transcriptMutationPending(context) || STATE.cursor == null) return;
   const token = STATE.loadingThreadToken;
   const before = STATE.cursor;
   const showSys = STATE.showSys;
+  const language = CUR_LANG;
   context.paging = true;
   const btn = $("#moreBtn");
   if (btn) {
@@ -4101,16 +5171,96 @@ async function loadMore() {
   try {
     const r = await requestTranscriptPage(context, showSys, before);
     if (token !== STATE.loadingThreadToken || STATE.active !== context || STATE.showSys !== showSys) return;
-    const turns = [...(r.turns || []), ...(context.lastTurns || [])];
-    if (!await commitThreadTranscript(token, turns, !!r.has_more, { preserve: true })) return;
-    if (token !== STATE.loadingThreadToken || STATE.active !== context || STATE.showSys !== showSys) return;
+    const feed = $("#chatFeed");
+    const scroll = $("#feedScroll");
+    const newTurns = r.turns || [];
+    const newItems = transcriptItems(newTurns);
+    const template = document.createElement("template");
+    const newRows = [];
+    for (const item of newItems) {
+      const existingRow = feedRowMap.get(String(item.key));
+      if (existingRow) {
+        newRows.push(existingRow);
+        continue;
+      }
+      template.innerHTML = renderItemHTML(item, context.provider);
+      const next = template.content.firstElementChild;
+      if (!next) continue;
+      next.__k1ttyItem = { ...item, actions: item.actions?.slice() };
+      next.__k1ttyIdentity = transcriptIdentity(item);
+      next.__k1ttyLanguage = language;
+      newRows.push(next);
+    }
+    const prevHeight = scroll ? scroll.scrollHeight : 0;
+    const prevTop = scroll ? scroll.scrollTop : 0;
+    if (scroll?.style) scroll.style.overflowAnchor = "none";
+    const firstChild = feed.firstElementChild;
+    if (newRows.length) {
+      if (typeof document.createDocumentFragment === "function") {
+        const frag = document.createDocumentFragment();
+        for (const next of newRows) frag.appendChild(next);
+        feed.insertBefore(frag, firstChild);
+      } else {
+        for (const next of newRows) {
+          feed.insertBefore(next, firstChild);
+        }
+      }
+      for (const next of newRows) {
+        if (next.dataset?.key) feedRowMap.set(next.dataset.key, next);
+      }
+    }
+    renderMoreBar(!!r.has_more);
+    const addedHeight = scroll ? scroll.scrollHeight - prevHeight : 0;
+    let turns = [...newTurns, ...(context.lastTurns || [])];
+    let loadedCount = STATE.loadedMsgs + (r.page_msgs || 0);
+    if (typeof document.createDocumentFragment === "function" && feed.children.length > 320) {
+      while (feed.children.length > 260) {
+        const last = feed.lastElementChild;
+        if (!last) break;
+        const k = last.dataset?.key;
+        if (k) feedRowMap.delete(k);
+        last.remove();
+      }
+      const keptKeys = new Set();
+      for (const row of feed.children) {
+        if (row.dataset?.key) keptKeys.add(row.dataset.key);
+      }
+      const trimmedTurns = [];
+      let msgCount = 0;
+      for (const turn of turns) {
+        const keptItems = (turn.items || []).filter((it) => keptKeys.has(String(it.key)));
+        if (keptItems.length) {
+          trimmedTurns.push({ ...turn, items: keptItems });
+          for (const it of keptItems) {
+            if (it.kind === "user" || it.kind === "assistant") msgCount++;
+          }
+        }
+      }
+      turns = trimmedTurns;
+      loadedCount = msgCount;
+      const midRow = feed.children[Math.floor(feed.children.length / 2)];
+      context.windowKey = midRow?.dataset?.key || feed.lastElementChild?.dataset?.key || context.windowKey || null;
+      context.hasNewer = true;
+      if (typeof renderNewerBar === "function") renderNewerBar(true);
+    }
+    if (scroll) {
+      scroll.scrollTop = prevTop + addedHeight;
+    }
+    if (typeof applyThreadSearchHighlights === "function") {
+      const findBar = $("#threadSearchBar");
+      if (findBar && !findBar.classList.contains("hidden")) {
+        applyThreadSearchHighlights($("#threadSearchInput")?.value || "", threadFindWholeWord, activeFindEl);
+      }
+    }
     STATE.cursor = r.cursor;
-    STATE.loadedMsgs += r.page_msgs || 0;
+    STATE.loadedMsgs = loadedCount;
     context.hasMore = !!r.has_more;
     context.lastTurns = turns;
     context.totalLabel = /^загружено:/.test(r.total_label || "") ? `загружено: ${STATE.loadedMsgs}` : (r.total_label || context.totalLabel || "");
     context.transcriptCache?.clear();
-    rememberTranscript(context, showSys, { ...r, total_label: context.totalLabel, page_msgs: STATE.loadedMsgs, turns: context.lastTurns });
+    rememberTranscript(context, showSys, { ...r, has_newer: !!context.hasNewer, total_label: context.totalLabel, page_msgs: STATE.loadedMsgs, turns: context.lastTurns });
+    if (typeof feedScrollbar !== "undefined") feedScrollbar?.update();
+    updateScrollBtn();
   } catch (e) {
     if (token !== STATE.loadingThreadToken || STATE.active !== context) return;
     toast(e.message, "err");
@@ -4129,18 +5279,57 @@ function updateScrollBtn() {
   const sc = $("#feedScroll");
   const btn = $("#scrollBottomBtn");
   if (!sc || !btn) return;
-  const dist = sc.scrollHeight - sc.scrollTop - sc.clientHeight;
+  if (STATE.active?.hasNewer) {
+    if (btn.classList.contains("hidden")) btn.classList.remove("hidden");
+    return;
+  }
+  const metrics = typeof feedScrollbar?.getMetrics === "function" ? feedScrollbar.getMetrics() : null;
+  const sh = metrics?.sh > 0 ? metrics.sh : sc.scrollHeight;
+  const ch = metrics?.ch > 0 ? metrics.ch : sc.clientHeight;
+  const dist = sh - sc.scrollTop - ch;
   const hidden = dist < 380;
   if (btn.classList.contains("hidden") !== hidden) btn.classList.toggle("hidden", hidden);
 }
 let scrollButtonFrame = 0;
+let scrollIdleTimer = 0;
 $("#feedScroll").addEventListener("scroll", () => {
-  if (!scrollButtonFrame) scrollButtonFrame = requestAnimationFrame(() => { scrollButtonFrame = 0; updateScrollBtn(); });
+  document.body.classList.add("is-scrolling");
+  if (scrollIdleTimer) clearTimeout(scrollIdleTimer);
+  scrollIdleTimer = setTimeout(() => {
+    scrollIdleTimer = 0;
+    document.body.classList.remove("is-scrolling");
+  }, 140);
+  if (!scrollButtonFrame) {
+    scrollButtonFrame = requestAnimationFrame(() => {
+      scrollButtonFrame = 0;
+      updateScrollBtn();
+      const sc = $("#feedScroll");
+      if (
+        sc
+        && STATE.active?.hasMore
+        && !STATE.active.paging
+        && !STATE.active.loading
+        && !transcriptMutationPending()
+        && STATE.cursor != null
+        && !contextLoadingGuard
+        && sc.scrollTop < 260
+        && sc.scrollHeight > sc.clientHeight + 120
+      ) {
+        loadMore();
+      }
+    });
+  }
 }, { passive: true });
 function preferredScrollBehavior() {
   return document.documentElement.dataset.motion === "reduced" ? "auto" : "smooth";
 }
-$("#scrollBottomBtn").onclick = () => $("#feedScroll").scrollTo({ top: $("#feedScroll").scrollHeight, behavior: preferredScrollBehavior() });
+$("#scrollBottomBtn").onclick = () => {
+  if (STATE.active?.hasNewer) {
+    jumpToLatestMessages();
+    return;
+  }
+  $("#feedScroll").scrollTo({ top: $("#feedScroll").scrollHeight, behavior: preferredScrollBehavior() });
+};
 
 let editCtx = null;
 async function openEdit(key) {
@@ -4196,6 +5385,9 @@ async function applyEdit() {
     });
     const job = await waitJob(r.job_id);
     if (editCtx === context) closeModal("editModal");
+    if (STATE.active?.provider === context.provider && STATE.active.id === context.cid && STATE.active.hasNewer) {
+      STATE.active.windowKey = context.key;
+    }
     await finishTranscriptMutation(context, true);
     showReport(t("saved"), job.result);
   } catch (e) {
@@ -4431,7 +5623,8 @@ function updateThreadNoticesBtn() {
 }
 
 function showNoticeError(error) {
-  const message = error ? String(error.message || error) : "";
+  const raw = error ? String(error.message || error) : "";
+  const message = localizeBackendText(raw);
   $("#noticeError").textContent = message;
   $("#noticeError").classList.toggle("hidden", !message);
   $("#noticeReloadBtn").classList.toggle("hidden", !message);
@@ -4874,7 +6067,7 @@ function showReport(title, report) {
 
   if (Array.isArray(rep.warns)) {
     for (const w of rep.warns) {
-      if (w) html += `<div class="note warn">${ico("warn")}<span>${esc(w)}</span></div>`;
+      if (w) html += `<div class="note warn">${ico("warn")}<span>${esc(localizeBackendText(w))}</span></div>`;
     }
   }
 
@@ -5032,7 +6225,7 @@ async function openBackups(provider = "all", cid = null) {
               data-act="restore-bk"
               data-prov="${esc(b.provider)}"
               data-dir="${esc(b.dir)}"
-              ${b.restorable ? "" : `disabled title="${esc(b.reason)}"`}>
+              ${b.restorable ? "" : `disabled title="${esc(localizeBackendText(b.reason))}"`}>
               ${ico("restore")}
               <span class="arm-label">${esc(t("restore"))}</span>
               <span class="arm-bar"></span>
@@ -5059,7 +6252,7 @@ async function openBackups(provider = "all", cid = null) {
         </div>`;
     }).join("");
   } catch (e) {
-    $("#bkList").innerHTML = `<div class="note err">${ico("alert")}<span>${esc(e.message)}</span></div>`;
+    $("#bkList").innerHTML = `<div class="note err">${ico("alert")}<span>${esc(localizeBackendText(e.message))}</span></div>`;
   } finally {
     stopLoad();
   }
@@ -5147,7 +6340,7 @@ async function openDeleteAllBackups() {
       <span>${esc(t("bk_count_lbl", { n: r.total_count }))} · ${fmtSize(r.total_bytes)}</span>`;
     confirmBtn.disabled = false;
   } catch (e) {
-    listEl.innerHTML = `<div class="note err">${ico("alert")}<span>${esc(e.message)}</span></div>`;
+    listEl.innerHTML = `<div class="note err">${ico("alert")}<span>${esc(localizeBackendText(e.message))}</span></div>`;
   } finally {
     stopLoad();
   }
@@ -5356,7 +6549,8 @@ $("#convertApplyBtn").onclick = async () => {
 let importCtx = null;
 
 function showImportError(error) {
-  const message = error ? String(error.message || error) : "";
+  const raw = error ? String(error.message || error) : "";
+  const message = localizeBackendText(raw);
   $("#importErrorDetails").textContent = message;
   $("#importError").classList.toggle("hidden", !message);
 }
@@ -5516,6 +6710,1233 @@ $("#importApplyBtn").onclick = async () => {
   }
 };
 
+const GEN_DEFAULT_PROMPT =
+  "You are a realistic dialogue generator for a local AI conversation history editor.\n" +
+  "Write a natural, coherent, multi-turn conversation between a user and an AI assistant that faithfully matches the user's scenario, tone, depth, and goals.\n" +
+  "Keep replies authentic, well-structured, and consistent across turns.";
+
+const GEN_FALLBACK_CATALOGS = {
+  openrouter: [
+    { id: "openrouter/free", name: "OpenRouter: Free Models Router", is_free: true, context_length: 200000 },
+    { id: "deepseek/deepseek-chat-v3-0324:free", name: "DeepSeek V3 0324 (free)", is_free: true, context_length: 163840 },
+    { id: "qwen/qwen3-coder:free", name: "Qwen3 Coder (free)", is_free: true, context_length: 262144 },
+    { id: "meta-llama/llama-3.3-70b-instruct:free", name: "Llama 3.3 70B Instruct (free)", is_free: true, context_length: 131072 },
+    { id: "google/gemini-2.0-flash-exp:free", name: "Gemini 2.0 Flash Exp (free)", is_free: true, context_length: 1048576 },
+    { id: "mistralai/mistral-small-3.1-24b-instruct:free", name: "Mistral Small 3.1 24B (free)", is_free: true, context_length: 128000 },
+  ],
+  deepseek: [
+    { id: "deepseek-flash", name: "deepseek-flash", is_free: false, context_length: 131072 },
+    { id: "deepseek-v4-pro", name: "deepseek-v4-pro", is_free: false, context_length: 131072 },
+    { id: "deepseek-chat", name: "deepseek-chat", is_free: false, context_length: 131072 },
+    { id: "deepseek-reasoner", name: "deepseek-reasoner", is_free: false, context_length: 131072 },
+  ],
+  custom: [
+    { id: "qwen3:8b", name: "qwen3:8b", is_free: true, context_length: null },
+    { id: "llama3.1:8b", name: "llama3.1:8b", is_free: true, context_length: null },
+  ],
+};
+
+let genCtx = null;
+
+function genClearTimer() {
+  if (genCtx?.timerId) {
+    clearInterval(genCtx.timerId);
+    genCtx.timerId = null;
+  }
+}
+
+function genSetError(elId, detailsId, err) {
+  const box = $(`#${elId}`);
+  const det = $(`#${detailsId}`);
+  if (!box || !det) return;
+  if (!err) {
+    box.classList.add("hidden");
+    det.textContent = "";
+    return;
+  }
+  det.textContent = localizeBackendText(err instanceof Error ? err.message : String(err));
+  box.classList.remove("hidden");
+}
+
+function genProviderName(prov) {
+  if (prov === "openrouter") return "OpenRouter";
+  if (prov === "deepseek") return "DeepSeek";
+  return t("gen_prov_custom");
+}
+
+function genIsLocalUrl(url) {
+  const lower = String(url || "").trim().toLowerCase();
+  return (
+    lower.includes("://localhost") ||
+    lower.includes("://127.0.0.1") ||
+    lower.includes("://0.0.0.0") ||
+    lower.includes("://[::1]")
+  );
+}
+
+function genDefaultPrompt() {
+  return (genCtx?.config?.default_generator_prompt || GEN_DEFAULT_PROMPT).trim();
+}
+
+function genNormalizeCatalog(catalog, models, provider) {
+  if (Array.isArray(catalog) && catalog.length) {
+    return catalog
+      .filter((m) => m && m.id)
+      .map((m) => ({
+        id: String(m.id),
+        name: String(m.name || m.id),
+        is_free: !!m.is_free || String(m.id) === "openrouter/free" || String(m.id).endsWith(":free"),
+        context_length: m.context_length || null,
+      }));
+  }
+  if (Array.isArray(models) && models.length) {
+    return models.map((id) => ({
+      id: String(id),
+      name: String(id),
+      is_free: String(id) === "openrouter/free" || String(id).endsWith(":free"),
+      context_length: null,
+    }));
+  }
+  return (GEN_FALLBACK_CATALOGS[provider] || GEN_FALLBACK_CATALOGS.openrouter).map((m) => ({ ...m }));
+}
+
+function genActiveProfile(prov) {
+  const p = prov || genCtx?.provider || "openrouter";
+  return genCtx?.config?.providers?.[p] || null;
+}
+
+function genFormatCtx(len) {
+  if (!len || !Number.isFinite(len)) return "";
+  if (len >= 1000000) return `${Math.round(len / 104857.6) / 10}M`;
+  if (len >= 1000) return `${Math.round(len / 1024)}K`;
+  return String(len);
+}
+
+function genSetDropdownOpen(open) {
+  const dd = $("#genModelDropdown");
+  const btn = $("#genModelDropBtn");
+  if (!dd) return;
+  if (genCtx) genCtx.dropdownOpen = !!open;
+  dd.classList.toggle("hidden", !open);
+  if (btn) btn.setAttribute("aria-expanded", open ? "true" : "false");
+  if (open) genRenderModelsDropdown();
+}
+
+function genRenderModelsDropdown() {
+  const dd = $("#genModelDropdown");
+  if (!dd || !genCtx) return;
+  const isOR = genCtx.provider === "openrouter";
+  let list = Array.isArray(genCtx.catalog) ? genCtx.catalog : [];
+  if (isOR && genCtx.freeOnly) {
+    const onlyFree = list.filter((m) => m.is_free);
+    if (onlyFree.length) list = onlyFree;
+  }
+  const q = genCtx.modelSearchDirty ? ($("#genModelInput")?.value || "").trim().toLowerCase() : "";
+  if (q) {
+    list = list.filter((m) => m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q));
+  }
+  if (!list.length) {
+    dd.innerHTML = `<div class="gen-model-empty">${esc(t("gen_model_empty"))}</div>`;
+    return;
+  }
+  const visible = list.slice(0, 160);
+  dd.innerHTML = visible
+    .map((m) => {
+      const selected = m.id === genCtx.model ? " selected" : "";
+      const freePill = m.is_free ? '<span class="gen-model-free">FREE</span>' : "";
+      const ctxStr = genFormatCtx(m.context_length);
+      const ctxBadge = ctxStr ? `<span class="gen-model-ctx">${esc(ctxStr)}</span>` : "";
+      const showSub = m.name && m.name !== m.id;
+      return `
+        <button type="button" class="gen-model-opt${selected}" role="option" aria-selected="${selected ? "true" : "false"}" data-gen-model-id="${esc(m.id)}">
+          <span class="gen-model-opt-main">
+            <span class="gen-model-opt-id">${esc(m.id)}</span>
+            ${showSub ? `<span class="gen-model-opt-sub">${esc(m.name)}</span>` : ""}
+          </span>
+          <span class="gen-model-opt-meta">${freePill}${ctxBadge}</span>
+        </button>`;
+    })
+    .join("");
+}
+
+function genApplyProfileToState(prov, config) {
+  if (!genCtx) return;
+  const prof = config?.providers?.[prov];
+  genCtx.provider = prov;
+  genCtx.catalog = genNormalizeCatalog(prof?.model_catalog, prof?.models, prov);
+  genCtx.freeOnly = prof?.free_only ?? prov === "openrouter";
+  genCtx.baseUrl = prof?.base_url || (prov === "openrouter" ? "https://openrouter.ai/api/v1" : prov === "deepseek" ? "https://api.deepseek.com" : "http://localhost:11434/v1");
+  genCtx.model = prof?.model || genCtx.catalog[0]?.id || "";
+  genCtx.modelSearchDirty = false;
+  if ($("#genModelInput")) $("#genModelInput").value = genCtx.model;
+  if ($("#genBaseUrlInput")) $("#genBaseUrlInput").value = genCtx.baseUrl;
+  const hasKey = !!prof?.has_key;
+  const keyOpt = prov === "custom" && genIsLocalUrl(genCtx.baseUrl);
+  genCtx.keyEditorOpen = prov === "custom" || (!hasKey && !keyOpt);
+}
+
+let genSaveDraftTimer = 0;
+let genDraftsCache = [];
+
+function genUpdateResumeBar() {
+  const bar = $("#genResumeBar");
+  const titleEl = $("#genResumeTitle");
+  if (!bar) return;
+  const hasDoc = !!(genCtx?.doc && Array.isArray(genCtx.doc.entries) && genCtx.doc.entries.length);
+  bar.classList.toggle("hidden", !hasDoc);
+  if (hasDoc && titleEl) {
+    titleEl.textContent = $("#genPreviewTitleInput")?.value.trim() || genCtx.doc?.meta?.title || "Generated dialogue";
+  }
+}
+
+function genSyncDraftsBadge() {
+  const badge = $("#genDraftsCount");
+  if (!badge) return;
+  const count = Array.isArray(genDraftsCache) ? genDraftsCache.length : 0;
+  badge.textContent = String(count);
+  badge.classList.toggle("hidden", count <= 0);
+}
+
+function genRenderDraftsList() {
+  const listEl = $("#genDraftsList");
+  if (!listEl) return;
+  if (!Array.isArray(genDraftsCache) || !genDraftsCache.length) {
+    listEl.innerHTML = `<div class="gen-drafts-empty">${esc(t("gen_drafts_empty"))}</div>`;
+    return;
+  }
+  listEl.innerHTML = genDraftsCache.map((d) => {
+    const id = esc(d.id || "");
+    const title = esc(d.title || "Generated dialogue");
+    const turns = d.stats?.turns || 0;
+    const msgs = d.stats?.total || 0;
+    const metaParts = [];
+    if (d.provider) metaParts.push(genProviderName(d.provider));
+    if (d.model) metaParts.push(d.model);
+    if (turns) metaParts.push(t("gen_stat_turns", { n: turns }));
+    else if (msgs) metaParts.push(t("gen_stat_msgs", { n: msgs }));
+    const tsRaw = d.updated_at || d.created_at || "";
+    if (tsRaw) metaParts.push(fmtTime(tsRaw));
+    const topic = String(d.topic || "").trim();
+    return `
+      <div class="gen-draft-card" data-draft-id="${id}">
+        <div class="gen-draft-main">
+          <div class="gen-draft-title">${title}</div>
+          <div class="gen-draft-meta">${metaParts.map((m) => `<span>${esc(m)}</span>`).join("<span>·</span>")}</div>
+          ${topic ? `<div class="gen-draft-topic">${esc(topic)}</div>` : ""}
+        </div>
+        <div class="gen-draft-actions">
+          <button type="button" class="btn sm primary" data-draft-open="${id}">${esc(t("gen_draft_open"))}</button>
+          <button type="button" class="btn sm ghost" data-draft-del="${id}" title="${esc(t("delete"))}">${ico("trash")}</button>
+        </div>
+      </div>`;
+  }).join("");
+}
+
+async function genRefreshDraftsList() {
+  try {
+    const res = await rpc("generator_drafts", "all", {});
+    genDraftsCache = Array.isArray(res?.drafts) ? res.drafts : [];
+    genSyncDraftsBadge();
+    if (genCtx?.stage === "drafts") genRenderDraftsList();
+  } catch {}
+}
+
+function genScheduleDraftSave() {
+  if (!genCtx?.doc || !Array.isArray(genCtx.doc.entries) || !genCtx.doc.entries.length) return;
+  clearTimeout(genSaveDraftTimer);
+  const ctxSnap = genCtx;
+  const titleVal = $("#genPreviewTitleInput")?.value.trim() || ctxSnap.doc?.meta?.title || "";
+  genSaveDraftTimer = setTimeout(() => {
+    if (!ctxSnap.doc) return;
+    rpc("generator_save_draft", "all", {
+      id: ctxSnap.draftId || undefined,
+      title: titleVal,
+      topic: ($("#genTopicInput")?.value || ctxSnap.topic || "").trim(),
+      provider: ctxSnap.provider,
+      model: ctxSnap.model,
+      effort: ctxSnap.effort,
+      doc: ctxSnap.doc,
+    }).then((res) => {
+      if (ctxSnap === genCtx && res?.id) ctxSnap.draftId = res.id;
+      genRefreshDraftsList();
+    }).catch(() => {});
+  }, 260);
+}
+
+async function genOpenDraft(id) {
+  if (!id || !genCtx || genCtx.busy) return;
+  try {
+    const res = await rpc("generator_load_draft", "all", { id });
+    const d = res?.draft;
+    if (!d?.doc || !genCtx) return;
+    genCtx.draftId = d.id || id;
+    genCtx.doc = d.doc;
+    genCtx.stats = d.stats || null;
+    genCtx.topic = d.topic || "";
+    if (d.provider) genCtx.provider = d.provider;
+    if (d.model) genCtx.model = d.model;
+    if (d.effort) genCtx.effort = d.effort;
+    genCtx.editingIdx = -1;
+    genCtx.stage = "preview";
+    $("#genPreviewTitleInput").value = d.title || d.doc?.meta?.title || "";
+    genSyncTargetGrids();
+    genSyncApiUI();
+    genSyncControls();
+    genRenderPreview();
+    genSyncStepUI();
+  } catch (e) {
+    toast(e?.message || String(e), "err");
+  }
+}
+
+async function genDeleteDraft(id) {
+  if (!id) return;
+  try {
+    await rpc("generator_delete_draft", "all", { id });
+    if (genCtx?.draftId === id) {
+      genCtx.draftId = null;
+    }
+    genDraftsCache = genDraftsCache.filter((d) => d.id !== id);
+    genSyncDraftsBadge();
+    genRenderDraftsList();
+    toast(t("gen_draft_deleted"), "ok");
+  } catch (e) {
+    toast(e?.message || String(e), "err");
+  }
+}
+
+function genSyncStepUI() {
+  if (!genCtx) return;
+  const stage = genCtx.stage;
+  const hasDoc = !!(genCtx.doc && Array.isArray(genCtx.doc.entries) && genCtx.doc.entries.length);
+  const isLoading = stage === "loading";
+  $("#genStageConfig")?.classList.toggle("hidden", stage !== "config");
+  $("#genStageLoading")?.classList.toggle("hidden", !isLoading);
+  $("#genStagePreview")?.classList.toggle("hidden", stage !== "preview");
+  $("#genStageDrafts")?.classList.toggle("hidden", stage !== "drafts");
+  $("#genFootConfig")?.classList.toggle("hidden", stage === "preview" || stage === "drafts");
+  $("#genFootPreview")?.classList.toggle("hidden", stage !== "preview");
+  const draftsBtn = $("#genDraftsBtn");
+  if (draftsBtn) {
+    const draftsActive = stage === "drafts";
+    draftsBtn.classList.toggle("active", draftsActive);
+    draftsBtn.setAttribute("aria-selected", draftsActive ? "true" : "false");
+    draftsBtn.disabled = genCtx.busy || isLoading;
+  }
+  $$("[data-gen-step]", $("#genStepsPill")).forEach((el) => {
+    const step = Number(el.dataset.genStep);
+    const active = (stage === "preview" && step === 2) || ((stage === "config" || isLoading) && step === 1);
+    el.classList.toggle("active", active);
+    el.setAttribute("aria-selected", active ? "true" : "false");
+    el.disabled = isLoading || (step === 2 && !hasDoc);
+  });
+  const runBtn = $("#genRunBtn");
+  if (runBtn) {
+    runBtn.classList.toggle("hidden", isLoading);
+    runBtn.disabled = genCtx.busy || isLoading;
+  }
+  genUpdateResumeBar();
+}
+
+function genSyncApiUI() {
+  if (!genCtx) return;
+  const prov = genCtx.provider || "openrouter";
+  const prof = genActiveProfile(prov);
+  const hasKey = !!prof?.has_key;
+  const keyOpt = prov === "custom" && genIsLocalUrl($("#genBaseUrlInput")?.value || genCtx.baseUrl);
+  const lbl = $("#genApiLabel");
+  const mask = $("#genKeyMask");
+  const editor = $("#genApiEditor");
+  const editBtn = $("#genEditKeyBtn");
+  const clearBtn = $("#genClearKeyBtn");
+  const baseRow = $("#genBaseUrlRow");
+  const hint = $("#genApiHint");
+
+  $$("[data-api-prov]", $("#genProviderSeg")).forEach((b) => {
+    const on = b.dataset.apiProv === prov;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-checked", on ? "true" : "false");
+  });
+
+  if (lbl) {
+    lbl.textContent = prov === "openrouter"
+      ? `OpenRouter ${t("gen_api_key_lbl")}`
+      : prov === "deepseek"
+        ? `DeepSeek ${t("gen_api_key_lbl")}`
+        : `Base URL · ${t("gen_api_key_lbl")}`;
+  }
+  if (mask) {
+    if (hasKey) {
+      mask.textContent = prof?.from_env
+        ? `${prof.key_masked} (${t("gen_key_env", { env: prof.env_var || "ENV" })})`
+        : (prof?.key_masked || "sk-••••");
+    } else if (keyOpt) {
+      mask.textContent = t("gen_key_optional");
+    } else {
+      mask.textContent = t("gen_key_missing");
+    }
+  }
+  if (baseRow) baseRow.classList.toggle("hidden", prov !== "custom");
+  const open = (!hasKey && !keyOpt) || !!genCtx.keyEditorOpen;
+  if (editor) editor.classList.toggle("hidden", !open);
+  if (editBtn) editBtn.textContent = t(open ? "gen_close_key" : "gen_edit_key");
+  if (clearBtn) clearBtn.classList.toggle("hidden", !hasKey || !!prof?.from_env);
+  if (hint) {
+    if (prov === "openrouter") {
+      hint.innerHTML = `${esc(t("gen_hint_openrouter"))} <a href="https://openrouter.ai/keys" target="_blank" rel="noopener">openrouter.ai/keys</a>`;
+    } else if (prov === "deepseek") {
+      hint.innerHTML = `${esc(t("gen_hint_deepseek"))} <a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener">platform.deepseek.com</a>`;
+    } else {
+      hint.textContent = t("gen_hint_custom");
+    }
+  }
+
+  const freeBtn = $("#genFreeOnlyBtn");
+  if (freeBtn) {
+    const showFree = prov === "openrouter";
+    freeBtn.classList.toggle("hidden", !showFree);
+    if (showFree) {
+      const freeCount = (genCtx.catalog || []).filter((m) => m.is_free).length;
+      freeBtn.classList.toggle("active", !!genCtx.freeOnly);
+      freeBtn.setAttribute("aria-pressed", genCtx.freeOnly ? "true" : "false");
+      freeBtn.textContent = freeCount > 0 ? t("gen_free_only_count", { n: freeCount }) : t("gen_free_only_btn");
+    }
+  }
+}
+
+function genBuildContractPreview() {
+  if (!genCtx) return "";
+  const length = genCtx.length || "medium";
+  const turns = Math.max(1, Math.min(30, Number(genCtx.customTurns || $("#genCustomTurnsInput")?.value || 6) || 6));
+  const turnsLine =
+    length === "short"
+      ? "short conversation (3 to 4 exchanges)"
+      : length === "long"
+        ? "detailed conversation (9 to 12 exchanges)"
+        : length === "custom"
+          ? `about ${turns} user-assistant exchanges`
+          : "medium conversation (5 to 7 exchanges)";
+  const lang = genCtx.language || "auto";
+  const langLine = lang === "auto" ? "match scenario prompt language" : lang;
+  const folderPath = ($("#genFolderInput")?.value || "").trim() || "...";
+  const ctxLine = genCtx.useFolder
+    ? `workspace directory = ${folderPath}`
+    : "pure topical chat (no local filesystem)";
+  const toolsLine = genCtx.includeTools
+    ? "include thinking + paired tool_use / tool_result entries"
+    : "ONLY user and assistant entries";
+  return [
+    `1. Length: ${turnsLine}`,
+    `2. Language: ${langLine}`,
+    `3. Context: ${ctxLine}`,
+    `4. Steps: ${toolsLine}`,
+    `5. Raw JSON only (no markdown fences, no extra prose):`,
+    `{`,
+    `  "title": "Short descriptive chat title",`,
+    `  "entries": [`,
+    `    {"kind": "user", "text": "..."},`,
+    `    {"kind": "assistant", "text": "..."}`,
+    `  ]`,
+    `}`,
+  ].join("\n");
+}
+
+function genUpdatePromptState() {
+  const pre = $("#genJsonContractPreview");
+  if (pre) pre.textContent = genBuildContractPreview();
+  const ta = $("#genSystemTemplateInput");
+  const badge = $("#genCustomPromptBadge");
+  if (ta && badge) {
+    const val = ta.value.trim();
+    const def = genDefaultPrompt();
+    badge.classList.toggle("hidden", !val || val === def);
+  }
+}
+
+function genSyncControls() {
+  if (!genCtx) return;
+  $$("[data-effort]", $("#genEffortSeg")).forEach((b) => {
+    const on = b.dataset.effort === genCtx.effort;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-checked", on ? "true" : "false");
+  });
+  const tempRange = $("#genTempRange");
+  const tempVal = $("#genTempVal");
+  const tempNum = Number.isFinite(genCtx.temperature) ? genCtx.temperature : 0.7;
+  if (tempRange) tempRange.value = String(tempNum);
+  if (tempVal) tempVal.textContent = tempNum.toFixed(1);
+  $$("[data-folder-mode]", $("#genFolderModeSeg")).forEach((b) => {
+    const on = (b.dataset.folderMode === "folder") === genCtx.useFolder;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-checked", on ? "true" : "false");
+  });
+  $("#genFolderBody")?.classList.toggle("hidden", !genCtx.useFolder);
+  $$("[data-length]", $("#genLengthSeg")).forEach((b) => {
+    const on = b.dataset.length === genCtx.length;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-checked", on ? "true" : "false");
+  });
+  $("#genCustomTurnsWrap")?.classList.toggle("hidden", genCtx.length !== "custom");
+  const toolsInp = $("#genIncludeToolsToggle");
+  if (toolsInp) toolsInp.checked = !!genCtx.includeTools;
+  const prevTools = $("#genPreviewIncludeTools");
+  if (prevTools) prevTools.checked = !!genCtx.includeTools;
+  const saveLbl = $("#genSaveBtnLabel");
+  if (saveLbl) {
+    saveLbl.textContent = t("gen_save_btn", { prov: PROV[genCtx.target]?.name || genCtx.target });
+  }
+  genUpdatePromptState();
+}
+
+function genSyncTargetGrids() {
+  if (!genCtx) return;
+  const g1 = $("#genTargetGrid");
+  const g2 = $("#genPreviewTargetGrid");
+  if (g1) renderProviderPickGrid(g1, genCtx.target);
+  if (g2) renderProviderPickGrid(g2, genCtx.target);
+  const saveLbl = $("#genSaveBtnLabel");
+  if (saveLbl) {
+    saveLbl.textContent = t("gen_save_btn", { prov: PROV[genCtx.target]?.name || genCtx.target });
+  }
+}
+
+function genEntryRoleInfo(entry) {
+  const k = entry.kind || "assistant";
+  const s = entry.subtype || "";
+  if (k === "user") return { cls: "role-user", label: t("gen_role_user") };
+  if (k === "assistant") return { cls: "role-assistant", label: t("gen_role_assistant") };
+  if (k === "system") return { cls: "role-system", label: t("gen_role_system") };
+  if (k === "tool" && s === "thinking") return { cls: "role-tool", label: t("gen_role_thinking") };
+  if (k === "tool" && (s === "tool_use" || s === "tool_call")) {
+    return { cls: "role-tool", label: t("gen_role_tool_use", { name: entry.tool || "tool" }) };
+  }
+  if (k === "tool") {
+    return { cls: "role-tool", label: t("gen_role_tool_result", { name: entry.tool || "tool" }) };
+  }
+  return { cls: "role-tool", label: k };
+}
+
+function genRecomputeStats() {
+  if (!genCtx?.doc?.entries) return;
+  const entries = genCtx.doc.entries;
+  let userCount = 0;
+  let assistantCount = 0;
+  let toolCount = 0;
+  let thinkingCount = 0;
+  let chars = 0;
+  for (const e of entries) {
+    chars += String(e.text || "").length;
+    if (e.kind === "user") userCount += 1;
+    else if (e.kind === "assistant") assistantCount += 1;
+    else if (e.kind === "tool" && e.subtype === "thinking") thinkingCount += 1;
+    else if (e.kind === "tool") toolCount += 1;
+  }
+  genCtx.stats = {
+    total: entries.length,
+    turns: Math.max(userCount, assistantCount),
+    user_count: userCount,
+    assistant_count: assistantCount,
+    tool_count: toolCount,
+    thinking_count: thinkingCount,
+    est_tokens: Math.max(1, Math.floor(chars / 4)),
+  };
+}
+
+function genRenderPreview() {
+  if (!genCtx?.doc) return;
+  genRecomputeStats();
+  const st = genCtx.stats || {};
+  const statsEl = $("#genPreviewStats");
+  if (statsEl) {
+    const chips = [
+      t("gen_stat_turns", { n: st.turns || 0 }),
+      t("gen_stat_msgs", { n: st.total || 0 }),
+    ];
+    if (st.tool_count > 0) chips.push(t("gen_stat_tools", { n: st.tool_count }));
+    if (st.thinking_count > 0) chips.push(t("gen_stat_thinking", { n: st.thinking_count }));
+    chips.push(`~${st.est_tokens || 1} ${t("tok_unit")}`);
+    if (genCtx.model) chips.push(`${genCtx.model} · ${genCtx.effort}`);
+    statsEl.innerHTML = chips.map((c) => `<span class="gen-stat-chip">${esc(c)}</span>`).join("");
+  }
+  const listEl = $("#genPreviewList");
+  if (!listEl) return;
+  const entries = genCtx.doc.entries || [];
+  listEl.innerHTML = entries.map((entry, idx) => {
+    const role = genEntryRoleInfo(entry);
+    const isEditing = genCtx.editingIdx === idx;
+    return `
+      <div class="gen-msg-card ${role.cls}" data-gen-idx="${idx}">
+        <div class="gen-msg-head">
+          <span class="gen-msg-role">${esc(role.label)}</span>
+          <div class="gen-msg-actions">
+            <button type="button" class="btn xs ghost" data-gen-edit="${idx}" title="${esc(t("edit"))}">${ico("edit")}</button>
+            <button type="button" class="btn xs ghost" data-gen-del="${idx}" title="${esc(t("delete"))}">${ico("trash")}</button>
+          </div>
+        </div>
+        ${isEditing ? `
+          <div class="gen-msg-editor">
+            <textarea class="textarea textarea-sm" rows="4" data-gen-edit-ta="${idx}" spellcheck="false">${esc(entry.text || "")}</textarea>
+            <div class="gen-msg-editor-foot">
+              <button type="button" class="btn xs" data-gen-edit-cancel="${idx}">${esc(t("cancel"))}</button>
+              <button type="button" class="btn xs primary" data-gen-edit-save="${idx}">${esc(t("save"))}</button>
+            </div>
+          </div>
+        ` : `<div class="gen-msg-text">${esc(entry.text || "")}</div>`}
+      </div>`;
+  }).join("");
+}
+
+async function openGenerateModal() {
+  if (genCtx && (genCtx.busy || genCtx.doc)) {
+    if (genCtx.stage === "drafts") {
+      genCtx.stage = genCtx.doc ? "preview" : "config";
+    }
+    genSetDropdownOpen(false);
+    genSyncTargetGrids();
+    genSyncApiUI();
+    genSyncControls();
+    genSyncStepUI();
+    openModal("generateModal");
+    genRefreshDraftsList();
+    return;
+  }
+  const defaultDst = (STATE.active && !STATE.active.readonlyBackup ? STATE.active.provider : null)
+    || PROV_ORDER.find((p) => STATE.providers[p]?.available)
+    || "antigravity";
+  genClearTimer();
+  genCtx = {
+    config: null,
+    provider: "openrouter",
+    baseUrl: "https://openrouter.ai/api/v1",
+    model: "openrouter/free",
+    catalog: genNormalizeCatalog(null, null, "openrouter"),
+    freeOnly: true,
+    modelSearchDirty: false,
+    dropdownOpen: false,
+    fetchedOpenRouter: false,
+    effort: "low",
+    temperature: 0.7,
+    useFolder: true,
+    length: "medium",
+    customTurns: 6,
+    language: "auto",
+    includeTools: true,
+    target: defaultDst,
+    stage: "config",
+    draftId: null,
+    topic: "",
+    doc: null,
+    stats: null,
+    usage: null,
+    editingIdx: -1,
+    busy: false,
+    timerId: null,
+    startedAt: 0,
+    keyEditorOpen: true,
+  };
+  genSetError("genError", "genErrorDetails", null);
+  genSetError("genPreviewError", "genPreviewErrorDetails", null);
+  $("#genApiKeyInput").value = "";
+  $("#genApiKeyInput").type = "password";
+  if ($("#genKeyVisIco")) $("#genKeyVisIco").innerHTML = '<use href="#i-eye"/>';
+  $("#genLangSelect").value = "auto";
+  if ($("#genModelInput")) $("#genModelInput").value = genCtx.model;
+  if ($("#genSystemTemplateInput")) $("#genSystemTemplateInput").value = GEN_DEFAULT_PROMPT;
+  genSetDropdownOpen(false);
+  genSyncTargetGrids();
+  genSyncApiUI();
+  genSyncControls();
+  genSyncStepUI();
+  openModal("generateModal");
+  genRefreshDraftsList();
+  try {
+    const cfg = await rpc("generator_config", "all", {});
+    if (!genCtx) return;
+    genCtx.config = cfg;
+    genCtx.effort = cfg.effort || "low";
+    genCtx.temperature = Number.isFinite(cfg.temperature) ? cfg.temperature : 0.7;
+    genCtx.useFolder = cfg.use_folder !== false;
+    genCtx.includeTools = genCtx.useFolder;
+    const activeProv = cfg.provider || "openrouter";
+    genApplyProfileToState(activeProv, cfg);
+    $("#genFolderInput").value = cfg.folder_path || cfg.default_desktop_dir || "";
+    const promptVal = (cfg.custom_generator_prompt || "").trim() || (cfg.default_generator_prompt || GEN_DEFAULT_PROMPT);
+    if ($("#genSystemTemplateInput")) $("#genSystemTemplateInput").value = promptVal;
+    genSyncApiUI();
+    genSyncControls();
+    if (activeProv === "openrouter" && (genCtx.catalog?.length || 0) <= 8 && !genCtx.fetchedOpenRouter) {
+      genRefreshModels("", { silent: true });
+    }
+  } catch (e) {
+    if (window.K1ttyDesktop || (typeof invoke === "function")) {
+      genSetError("genError", "genErrorDetails", e);
+    }
+  }
+}
+
+async function genRefreshModels(overrideKey = "", opts = {}) {
+  if (!genCtx || genCtx.busy) return;
+  const silent = !!opts.silent;
+  if (!silent) genSetError("genError", "genErrorDetails", null);
+  const saveBtn = $("#genSaveKeyBtn");
+  const refBtn = $("#genRefreshModelsBtn");
+  if (saveBtn) saveBtn.disabled = true;
+  if (refBtn) refBtn.disabled = true;
+  if (!silent) startLoad();
+  try {
+    const payload = { provider: genCtx.provider };
+    if (overrideKey) payload.api_key = overrideKey;
+    const baseUrl = ($("#genBaseUrlInput")?.value || "").trim();
+    if (genCtx.provider === "custom" && baseUrl) payload.base_url = baseUrl;
+    const res = await rpc("generator_models", "all", payload);
+    if (!genCtx) return;
+    if (res.provider === "openrouter" || genCtx.provider === "openrouter") {
+      genCtx.fetchedOpenRouter = true;
+    }
+    if (res.config) genCtx.config = res.config;
+    if (!silent) {
+      genCtx.keyEditorOpen = false;
+      $("#genApiKeyInput").value = "";
+    }
+    if ((res.provider || genCtx.provider) === genCtx.provider) {
+      genApplyProfileToState(genCtx.provider, res.config || genCtx.config);
+      if (Array.isArray(res.model_catalog) && res.model_catalog.length) {
+        genCtx.catalog = genNormalizeCatalog(res.model_catalog, res.models, genCtx.provider);
+      }
+      genSyncApiUI();
+      if (genCtx.dropdownOpen) genRenderModelsDropdown();
+    }
+    if (!silent) {
+      toast(t("gen_toast_models_ok", { provider: genProviderName(genCtx.provider), n: (res.models || []).length }), "ok");
+    }
+  } catch (e) {
+    if (!silent) genSetError("genError", "genErrorDetails", e);
+  } finally {
+    if (!silent) stopLoad();
+    if (saveBtn) saveBtn.disabled = false;
+    if (refBtn) refBtn.disabled = false;
+  }
+}
+
+async function runDialogueGenerate() {
+  if (!genCtx || genCtx.busy) return;
+  genSetError("genError", "genErrorDetails", null);
+  genSetError("genPreviewError", "genPreviewErrorDetails", null);
+  genSetDropdownOpen(false);
+  const prov = genCtx.provider || "openrouter";
+  const prof = genActiveProfile(prov);
+  const baseUrl = ($("#genBaseUrlInput")?.value || genCtx.baseUrl || "").trim();
+  const keyOpt = prov === "custom" && genIsLocalUrl(baseUrl);
+  const typedKey = $("#genApiKeyInput")?.value.trim() || "";
+  if (!prof?.has_key && !typedKey && !keyOpt) {
+    genCtx.keyEditorOpen = true;
+    genSyncApiUI();
+    genSetError("genError", "genErrorDetails", t("gen_need_key", { provider: genProviderName(prov) }));
+    $("#genApiKeyInput")?.focus();
+    return;
+  }
+  const topic = $("#genTopicInput")?.value.trim() || "";
+  if (!topic) {
+    genCtx.stage = "config";
+    genSyncStepUI();
+    genSetError("genError", "genErrorDetails", t("gen_need_topic"));
+    $("#genTopicInput")?.focus();
+    return;
+  }
+  const model = ($("#genModelInput")?.value || "").trim() || genCtx.model;
+  genCtx.model = model;
+  genCtx.language = $("#genLangSelect")?.value || "auto";
+  genCtx.busy = true;
+  genCtx.stage = "loading";
+  genCtx.editingIdx = -1;
+  genCtx.startedAt = Date.now();
+  const titleEl = $("#genLoadingTitle");
+  if (titleEl) titleEl.textContent = t("gen_phase_connect");
+  const metaEl = $("#genLoadingMeta");
+  if (metaEl) {
+    metaEl.textContent = t("gen_loading_meta", {
+      provider: genProviderName(prov),
+      model,
+      effort: genCtx.effort,
+    });
+  }
+  const timerEl = $("#genLoadingTimer");
+  if (timerEl) timerEl.textContent = "00:00";
+  genClearTimer();
+  genCtx.timerId = setInterval(() => {
+    if (!genCtx) return;
+    const sec = Math.floor((Date.now() - genCtx.startedAt) / 1000);
+    const m = String(Math.floor(sec / 60)).padStart(2, "0");
+    const s = String(sec % 60).padStart(2, "0");
+    if (timerEl) timerEl.textContent = `${m}:${s}`;
+    if (titleEl) {
+      titleEl.textContent = sec < 3 ? t("gen_phase_connect") : sec < 12 ? t("gen_phase_compose") : t("gen_phase_format");
+    }
+  }, 500);
+  genSyncStepUI();
+  startLoad();
+  try {
+    const customTurns = Math.max(1, Math.min(30, Number($("#genCustomTurnsInput")?.value || genCtx.customTurns || 6) || 6));
+    const genPrompt = ($("#genSystemTemplateInput")?.value || "").trim();
+    const payload = {
+      provider: prov,
+      model,
+      effort: genCtx.effort,
+      temperature: Number.isFinite(genCtx.temperature) ? genCtx.temperature : 0.7,
+      use_folder: genCtx.useFolder,
+      folder_path: $("#genFolderInput")?.value.trim() || "",
+      topic,
+      length: genCtx.length,
+      custom_turns: customTurns,
+      language: genCtx.language,
+      include_tools: genCtx.includeTools,
+      generator_prompt: genPrompt,
+      title: $("#genTitleInput")?.value.trim() || "",
+      system_prompt: $("#genSysPromptInput")?.value.trim() || "",
+    };
+    if (prov === "custom" && baseUrl) payload.base_url = baseUrl;
+    if (typedKey) payload.api_key = typedKey;
+    const res = await rpc("generator_generate", "all", payload);
+    if (!genCtx) return;
+    if (res.config) {
+      genCtx.config = res.config;
+      genCtx.keyEditorOpen = false;
+      $("#genApiKeyInput").value = "";
+      genSyncApiUI();
+    }
+    genCtx.draftId = res.draft_id || null;
+    genCtx.topic = topic;
+    genCtx.doc = res.doc;
+    genCtx.stats = res.stats;
+    genCtx.usage = res.usage;
+    genCtx.stage = "preview";
+    $("#genPreviewTitleInput").value = res.doc?.meta?.title || "";
+    genSyncTargetGrids();
+    genSyncControls();
+    genRenderPreview();
+    genSyncStepUI();
+    genRefreshDraftsList();
+  } catch (e) {
+    if (!genCtx) return;
+    genCtx.stage = "config";
+    genSyncStepUI();
+    genSetError("genError", "genErrorDetails", e);
+  } finally {
+    stopLoad();
+    genClearTimer();
+    if (genCtx) {
+      genCtx.busy = false;
+      genSyncStepUI();
+    }
+  }
+}
+
+async function saveGeneratedDialogue() {
+  if (!genCtx || !genCtx.doc || genCtx.busy) return;
+  genSetError("genPreviewError", "genPreviewErrorDetails", null);
+  if (!guardNotRunning(genCtx.target)) return;
+  genCtx.busy = true;
+  const saveBtn = $("#genSaveBtn");
+  const saveLbl = $("#genSaveBtnLabel");
+  if (saveBtn) saveBtn.disabled = true;
+  if (saveLbl) saveLbl.textContent = t("gen_saving_btn");
+  startLoad();
+  let savedRes = null;
+  try {
+    const title = $("#genPreviewTitleInput")?.value.trim() || "";
+    const includeTools = !!$("#genPreviewIncludeTools")?.checked;
+    const data = await rpc("generator_save_chat", genCtx.target, {
+      target: genCtx.target,
+      title,
+      include_tools: includeTools,
+      doc: genCtx.doc,
+    });
+    savedRes = data.result || {};
+  } catch (e) {
+    genSetError("genPreviewError", "genPreviewErrorDetails", e);
+  } finally {
+    stopLoad();
+    if (genCtx) genCtx.busy = false;
+    if (saveBtn) saveBtn.disabled = false;
+    genSyncControls();
+  }
+  if (!savedRes) return;
+  const targetProv = savedRes.provider || genCtx?.target;
+  const targetCid = savedRes.cid;
+  if (genCtx) {
+    genCtx.doc = null;
+    genCtx.draftId = null;
+    genCtx.stage = "config";
+  }
+  closeModal("generateModal");
+  genClearTimer();
+  toast(t("gen_toast_saved", { prov: PROV[targetProv]?.name || targetProv }), "ok");
+  try {
+    await refreshAll(true);
+    if (targetProv && targetCid) {
+      await openThread(targetProv, targetCid, { preserveSys: false });
+    }
+  } catch (e) {
+    toast(e.message || String(e), "err");
+  }
+}
+
+$("#genProviderSeg")?.addEventListener("click", (ev) => {
+  const b = ev.target.closest("[data-api-prov]");
+  if (!b || !genCtx || genCtx.busy) return;
+  const prov = b.dataset.apiProv;
+  if (!prov || prov === genCtx.provider) return;
+  genSetError("genError", "genErrorDetails", null);
+  genSetDropdownOpen(false);
+  genApplyProfileToState(prov, genCtx.config);
+  genSyncApiUI();
+  genSyncControls();
+  rpc("generator_save_config", "all", { provider: prov }).then((cfg) => {
+    if (!genCtx) return;
+    genCtx.config = cfg;
+    if (genCtx.provider === prov) {
+      genSyncApiUI();
+    }
+  }).catch(() => {});
+  if (prov === "openrouter" && (genCtx.catalog?.length || 0) <= 8 && !genCtx.fetchedOpenRouter) {
+    genRefreshModels("", { silent: true });
+  }
+});
+
+$("#genFreeOnlyBtn")?.addEventListener("click", () => {
+  if (!genCtx) return;
+  genCtx.freeOnly = !genCtx.freeOnly;
+  if (genCtx.freeOnly) {
+    const firstFree = (genCtx.catalog || []).find((m) => m.is_free);
+    const curInfo = (genCtx.catalog || []).find((m) => m.id === genCtx.model);
+    if (firstFree && (!curInfo || !curInfo.is_free)) {
+      genCtx.model = firstFree.id;
+      genCtx.modelSearchDirty = false;
+      if ($("#genModelInput")) $("#genModelInput").value = firstFree.id;
+    }
+  }
+  genSyncApiUI();
+  if (genCtx.dropdownOpen) genRenderModelsDropdown();
+  rpc("generator_save_config", "all", { provider: "openrouter", free_only: genCtx.freeOnly, model: genCtx.model }).catch(() => {});
+});
+
+$("#genModelInput")?.addEventListener("focus", () => {
+  if (!genCtx) return;
+  genCtx.modelSearchDirty = false;
+  genSetDropdownOpen(true);
+});
+
+$("#genModelInput")?.addEventListener("input", (ev) => {
+  if (!genCtx) return;
+  genCtx.model = ev.target.value.trim();
+  genCtx.modelSearchDirty = true;
+  genSetDropdownOpen(true);
+});
+
+$("#genModelDropBtn")?.addEventListener("click", (ev) => {
+  ev.stopPropagation();
+  if (!genCtx) return;
+  genCtx.modelSearchDirty = false;
+  genSetDropdownOpen(!genCtx.dropdownOpen);
+  if (genCtx.dropdownOpen) $("#genModelInput")?.focus();
+});
+
+$("#genModelDropdown")?.addEventListener("click", (ev) => {
+  const opt = ev.target.closest("[data-gen-model-id]");
+  if (!opt || !genCtx) return;
+  const id = opt.dataset.genModelId;
+  genCtx.model = id;
+  genCtx.modelSearchDirty = false;
+  if ($("#genModelInput")) $("#genModelInput").value = id;
+  genSetDropdownOpen(false);
+  rpc("generator_save_config", "all", { provider: genCtx.provider, model: id }).catch(() => {});
+});
+
+document.addEventListener("pointerdown", (ev) => {
+  if (!genCtx?.dropdownOpen) return;
+  if (!ev.target.closest("#genModelCombo")) {
+    genSetDropdownOpen(false);
+  }
+});
+
+$("#genEditKeyBtn")?.addEventListener("click", () => {
+  if (!genCtx) return;
+  genCtx.keyEditorOpen = !genCtx.keyEditorOpen;
+  genSyncApiUI();
+  if (genCtx.keyEditorOpen) $("#genApiKeyInput")?.focus();
+});
+
+$("#genKeyVisBtn")?.addEventListener("click", () => {
+  const inp = $("#genApiKeyInput");
+  const icoEl = $("#genKeyVisIco");
+  if (!inp) return;
+  const show = inp.type === "password";
+  inp.type = show ? "text" : "password";
+  if (icoEl) icoEl.innerHTML = show ? '<use href="#i-eye-off"/>' : '<use href="#i-eye"/>';
+});
+
+$("#genBaseUrlInput")?.addEventListener("input", () => {
+  if (!genCtx) return;
+  genCtx.baseUrl = $("#genBaseUrlInput")?.value.trim() || "";
+  genSyncApiUI();
+});
+
+$("#genSaveKeyBtn")?.addEventListener("click", async () => {
+  if (!genCtx || genCtx.busy) return;
+  const prov = genCtx.provider || "openrouter";
+  const key = $("#genApiKeyInput")?.value.trim() || "";
+  const baseUrl = ($("#genBaseUrlInput")?.value || "").trim();
+  const keyOpt = prov === "custom" && genIsLocalUrl(baseUrl || genCtx.baseUrl);
+  if (!key && !(prov === "custom" && baseUrl)) {
+    genSetError("genError", "genErrorDetails", t("gen_need_key", { provider: genProviderName(prov) }));
+    return;
+  }
+  if (prov === "custom" && !key && keyOpt) {
+    try {
+      const cfg = await rpc("generator_save_config", "all", { provider: "custom", base_url: baseUrl });
+      genCtx.config = cfg;
+      genCtx.keyEditorOpen = false;
+      genSyncApiUI();
+      return;
+    } catch (e) {
+      genSetError("genError", "genErrorDetails", e);
+      return;
+    }
+  }
+  genRefreshModels(key);
+});
+
+$("#genRefreshModelsBtn")?.addEventListener("click", () => {
+  const key = $("#genApiKeyInput")?.value.trim() || "";
+  genRefreshModels(key);
+});
+
+$("#genClearKeyBtn")?.addEventListener("click", async () => {
+  if (!genCtx || genCtx.busy) return;
+  const prov = genCtx.provider || "openrouter";
+  try {
+    const cfg = await rpc("generator_save_config", "all", { provider: prov, target_provider: prov, clear_key: true });
+    genCtx.config = cfg;
+    genCtx.keyEditorOpen = true;
+    $("#genApiKeyInput").value = "";
+    genSyncApiUI();
+    toast(t("gen_toast_key_cleared", { provider: genProviderName(prov) }), "ok");
+  } catch (e) {
+    genSetError("genError", "genErrorDetails", e);
+  }
+});
+
+$("#genEffortSeg")?.addEventListener("click", (ev) => {
+  const b = ev.target.closest("[data-effort]");
+  if (!b || !genCtx) return;
+  genCtx.effort = b.dataset.effort;
+  genSyncControls();
+});
+
+$("#genTempRange")?.addEventListener("input", (ev) => {
+  if (!genCtx) return;
+  const v = Number(ev.target.value);
+  if (Number.isFinite(v)) {
+    genCtx.temperature = v;
+    if ($("#genTempVal")) $("#genTempVal").textContent = v.toFixed(1);
+  }
+});
+
+$("#genFolderModeSeg")?.addEventListener("click", (ev) => {
+  const b = ev.target.closest("[data-folder-mode]");
+  if (!b || !genCtx) return;
+  genCtx.useFolder = b.dataset.folderMode === "folder";
+  genSyncControls();
+});
+
+$("#genFolderInput")?.addEventListener("input", () => genUpdatePromptState());
+
+$("#genFolderDesktopBtn")?.addEventListener("click", () => {
+  const desktop = genCtx?.config?.default_desktop_dir || "";
+  if (desktop && $("#genFolderInput")) {
+    $("#genFolderInput").value = desktop;
+    genUpdatePromptState();
+  }
+});
+
+$("#genFolderPickBtn")?.addEventListener("click", async () => {
+  if (!window.K1ttyDesktop?.pickFolder) return;
+  try {
+    const res = await window.K1ttyDesktop.pickFolder();
+    if (res && !res.cancelled && res.path && $("#genFolderInput")) {
+      $("#genFolderInput").value = res.path;
+      genUpdatePromptState();
+    }
+  } catch (e) {
+    toast(e.message || String(e), "err");
+  }
+});
+
+$("#genLengthSeg")?.addEventListener("click", (ev) => {
+  const b = ev.target.closest("[data-length]");
+  if (!b || !genCtx) return;
+  genCtx.length = b.dataset.length;
+  genSyncControls();
+});
+
+$("#genCustomTurnsInput")?.addEventListener("input", (ev) => {
+  if (!genCtx) return;
+  genCtx.customTurns = Math.max(1, Math.min(30, Number(ev.target.value) || 6));
+  genUpdatePromptState();
+});
+
+$("#genLangSelect")?.addEventListener("change", (ev) => {
+  if (!genCtx) return;
+  genCtx.language = ev.target.value || "auto";
+  genUpdatePromptState();
+});
+
+$("#genIncludeToolsToggle")?.addEventListener("change", (ev) => {
+  if (!genCtx) return;
+  genCtx.includeTools = !!ev.target.checked;
+  genSyncControls();
+});
+
+$("#genPreviewIncludeTools")?.addEventListener("change", (ev) => {
+  if (!genCtx) return;
+  genCtx.includeTools = !!ev.target.checked;
+  genSyncControls();
+});
+
+$("#genSystemTemplateInput")?.addEventListener("input", () => genUpdatePromptState());
+
+$("#genResetPromptBtn")?.addEventListener("click", () => {
+  if (!genCtx) return;
+  if ($("#genSystemTemplateInput")) {
+    $("#genSystemTemplateInput").value = genDefaultPrompt();
+  }
+  genUpdatePromptState();
+  rpc("generator_save_config", "all", { reset_generator_prompt: true }).catch(() => {});
+  toast(t("gen_toast_prompt_reset"), "ok");
+});
+
+function genHandleTargetClick(ev) {
+  const b = ev.target.closest("[data-pick-prov]");
+  if (!b || !genCtx || genCtx.busy) return;
+  genCtx.target = b.dataset.pickProv;
+  genSetError("genPreviewError", "genPreviewErrorDetails", null);
+  genSyncTargetGrids();
+}
+$("#genTargetGrid")?.addEventListener("click", genHandleTargetClick);
+$("#genPreviewTargetGrid")?.addEventListener("click", genHandleTargetClick);
+
+$("#genPreviewList")?.addEventListener("click", (ev) => {
+  if (!genCtx?.doc?.entries) return;
+  const editBtn = ev.target.closest("[data-gen-edit]");
+  if (editBtn) {
+    const idx = Number(editBtn.dataset.genEdit);
+    genCtx.editingIdx = genCtx.editingIdx === idx ? -1 : idx;
+    genRenderPreview();
+    if (genCtx.editingIdx === idx) {
+      $(`[data-gen-edit-ta="${idx}"]`, $("#genPreviewList"))?.focus();
+    }
+    return;
+  }
+  const cancelBtn = ev.target.closest("[data-gen-edit-cancel]");
+  if (cancelBtn) {
+    genCtx.editingIdx = -1;
+    genRenderPreview();
+    return;
+  }
+  const saveBtn = ev.target.closest("[data-gen-edit-save]");
+  if (saveBtn) {
+    const idx = Number(saveBtn.dataset.genEditSave);
+    const ta = $(`[data-gen-edit-ta="${idx}"]`, $("#genPreviewList"));
+    if (ta && genCtx.doc.entries[idx]) {
+      genCtx.doc.entries[idx].text = ta.value;
+    }
+    genCtx.editingIdx = -1;
+    genRenderPreview();
+    genScheduleDraftSave();
+    return;
+  }
+  const delBtn = ev.target.closest("[data-gen-del]");
+  if (delBtn) {
+    const idx = Number(delBtn.dataset.genDel);
+    if (genCtx.doc.entries.length <= 1) {
+      toast(t("gen_cannot_delete_last"), "err");
+      return;
+    }
+    genCtx.doc.entries.splice(idx, 1);
+    genCtx.editingIdx = -1;
+    genRenderPreview();
+    genScheduleDraftSave();
+  }
+});
+
+$("#genPreviewTitleInput")?.addEventListener("input", () => {
+  genScheduleDraftSave();
+});
+
+$("#genStepsPill")?.addEventListener("click", (ev) => {
+  const stepBtn = ev.target.closest("[data-gen-step]");
+  if (!stepBtn || stepBtn.disabled || !genCtx || genCtx.busy || genCtx.stage === "loading") return;
+  const step = Number(stepBtn.dataset.genStep);
+  if (step === 1) {
+    genCtx.stage = "config";
+    genCtx.editingIdx = -1;
+    genSyncStepUI();
+  } else if (step === 2 && genCtx.doc?.entries?.length) {
+    genCtx.stage = "preview";
+    genRenderPreview();
+    genSyncStepUI();
+  }
+});
+
+$("#genDraftsBtn")?.addEventListener("click", () => {
+  if (!genCtx || genCtx.busy) return;
+  if (genCtx.stage === "drafts") {
+    genCtx.stage = genCtx.prevStage || (genCtx.doc ? "preview" : "config");
+  } else {
+    genCtx.prevStage = genCtx.stage === "loading" ? "config" : genCtx.stage;
+    genCtx.stage = "drafts";
+    genRenderDraftsList();
+    genRefreshDraftsList();
+  }
+  genSyncStepUI();
+});
+
+$("#genDraftsBackBtn")?.addEventListener("click", () => {
+  if (!genCtx || genCtx.busy) return;
+  genCtx.stage = genCtx.prevStage || (genCtx.doc ? "preview" : "config");
+  genSyncStepUI();
+});
+
+$("#genResumeBtn")?.addEventListener("click", () => {
+  if (!genCtx?.doc || genCtx.busy) return;
+  genCtx.stage = "preview";
+  genRenderPreview();
+  genSyncStepUI();
+});
+
+$("#genDraftsList")?.addEventListener("click", (ev) => {
+  const openBtn = ev.target.closest("[data-draft-open]");
+  if (openBtn) {
+    genOpenDraft(openBtn.dataset.draftOpen);
+    return;
+  }
+  const delBtn = ev.target.closest("[data-draft-del]");
+  if (delBtn) {
+    genDeleteDraft(delBtn.dataset.draftDel);
+  }
+});
+
+$("#genRunBtn")?.addEventListener("click", () => runDialogueGenerate());
+$("#genRegenBtn")?.addEventListener("click", () => runDialogueGenerate());
+$("#genBackBtn")?.addEventListener("click", () => {
+  if (!genCtx || genCtx.busy) return;
+  genCtx.stage = "config";
+  genCtx.editingIdx = -1;
+  genSetError("genPreviewError", "genPreviewErrorDetails", null);
+  genSyncStepUI();
+});
+$("#genSaveBtn")?.addEventListener("click", () => saveGeneratedDialogue());
+
 $("#providerTabs").addEventListener("click", (ev) => {
   const b = ev.target.closest(".seg-btn");
   if (!b) return;
@@ -5528,7 +7949,7 @@ $("#searchInput").addEventListener("input", (ev) => {
   $("#searchClear").classList.toggle("hidden", !has);
   $("#searchKbd")?.classList.toggle("hidden", has);
   if (fullTextMode) scheduleGlobalSearch();
-  renderSidebar();
+  else renderSidebar();
 });
 $("#searchClear").onclick = () => {
   $("#searchInput").value = "";
@@ -5559,11 +7980,12 @@ $("#convList").addEventListener("click", (ev) => {
     return;
   }
   const hitKey = item.dataset.hitKey || "";
+  const hitKind = item.dataset.hitKind || "";
   const hitQuery = fullTextMode ? STATE.searchQuery.trim() : "";
   openThread(prov, cid, { preserveSys: false }).then(() => {
     if (hitKey) {
-      if (hitQuery) openThreadSearch(hitQuery);
-      jumpToMessageKey(hitKey);
+      if (hitQuery) openThreadSearch(hitQuery, { autoJump: false });
+      jumpToMessageKey(hitKey, hitKind);
     }
   });
 });
@@ -5601,6 +8023,10 @@ $("#toggleSysBtn").onclick = async () => {
   STATE.showSys = !STATE.showSys;
   syncSysButton();
   await refreshCurrentTranscript({ filterOnly: true });
+  const bar = $("#threadSearchBar");
+  if (bar && !bar.classList.contains("hidden") && ($("#threadSearchInput")?.value || "").trim()) {
+    scheduleThreadSearch();
+  }
 };
 
 $("#threadExportBtn").onclick = () => {
@@ -5638,6 +8064,9 @@ document.addEventListener("click", (ev) => {
   const closeBtn = ev.target.closest("[data-close]");
   if (closeBtn) { closeModal(closeBtn.dataset.close); return; }
   if (ev.target.classList.contains("modal-bg")) {
+    if (ev.target.id === "generateModal" && (genCtx?.busy || genCtx?.stage === "preview")) {
+      return;
+    }
     ev.target.classList.remove("open");
     disarmAll();
     return;
@@ -5671,8 +8100,10 @@ document.addEventListener("click", (ev) => {
     actEl.innerHTML = clamped
       ? `${ico("chev-down")}<span>${esc(t("show_more"))}</span>`
       : `${ico("chev-up")}<span>${esc(t("collapse"))}</span>`;
+    feedScrollbar?.update();
+  } else if (act === "expand-full") {
+    expandFullBlock(actEl);
   } else if (act === "copy-code") {
-     
     const code = actEl.closest(".code-wrap")?.querySelector("pre")?.textContent
       ?? CODE_STORE[Number(actEl.dataset.codeIdx)] ?? "";
     window.K1ttyDesktop.writeText(code).then(() => {
@@ -5682,6 +8113,16 @@ document.addEventListener("click", (ev) => {
     });
   }
 });
+
+$("#chatFeed")?.addEventListener("toggle", (ev) => {
+  const details = ev.target;
+  if (!details || details.tagName !== "DETAILS") return;
+  if (details.open) {
+    const block = details.closest(".tool-block");
+    if (block) hydrateToolBlock(block);
+  }
+  feedScrollbar?.update();
+}, true);
 
 document.addEventListener("keydown", (ev) => {
   if (ev.key === "Escape") {
@@ -5752,6 +8193,10 @@ window.addEventListener("hashchange", () => {
   if (!openFromHash()) showOverview();
 });
 
+let feedScrollbar = null;
+let overviewScrollbar = null;
+let convListScrollbar = null;
+
 function attachOverlayScrollbar(scroller, host, { top = 8, bottom = 8, right = 4 } = {}) {
   if (!scroller || !host) return null;
   scroller.classList.add("lg-scroll-host");
@@ -5769,51 +8214,108 @@ function attachOverlayScrollbar(scroller, host, { top = 8, bottom = 8, right = 4
   let dragging = false;
   let dragStartY = 0;
   let dragStartScroll = 0;
-  let rafId = 0;
+  let dragMaxY = 1;
+  let dragMaxScroll = 1;
+  let dragPendingY = 0;
+  let dragRafId = 0;
+  let measureRafId = 0;
+  let resizeTimer = 0;
+  let scrollRafId = 0;
+  let lastScrollTs = 0;
+  let lastPingTs = 0;
+  let cachedSh = 0;
+  let cachedCh = 0;
+  let cachedTh = 0;
+  let cachedThumbH = 28;
+  let cachedMaxScroll = 1;
+  let cachedMaxY = 0;
+  let hasScroll = false;
   let lastThumbHeight = "";
   let lastThumbTransform = "";
 
   const pingVisible = () => {
-    if (!track.classList.contains("has-scroll")) return;
-    track.classList.add("visible");
+    if (!hasScroll) return;
+    const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+    const wasVisible = track.classList.contains("visible");
+    if (!wasVisible) track.classList.add("visible");
+    if (wasVisible && !dragging && now - lastPingTs < 200) return;
+    lastPingTs = now;
     clearTimeout(hideTimer);
     if (!dragging) {
       hideTimer = setTimeout(() => track.classList.remove("visible"), 1100);
     }
   };
 
-  const update = () => {
-    rafId = 0;
-    const isHidden = scroller.classList.contains("hidden") || scroller.offsetParent === null;
+  const syncThumbPos = () => {
+    scrollRafId = 0;
+    if (!hasScroll) return;
+    const ratio = Math.min(1, Math.max(0, scroller.scrollTop / cachedMaxScroll));
+    const y = (ratio * cachedMaxY).toFixed(1);
+    const transform = `translate3d(0, ${y}px, 0)`;
+    if (transform !== lastThumbTransform) {
+      thumb.style.transform = transform;
+      lastThumbTransform = transform;
+    }
+  };
+
+  const measure = () => {
+    measureRafId = 0;
     const sh = scroller.scrollHeight;
     const ch = scroller.clientHeight;
     const th = track.clientHeight;
-    if (isHidden || sh <= ch + 2 || th <= 0) {
-      if (track.classList.contains("has-scroll") || track.classList.contains("visible")) track.classList.remove("has-scroll", "visible");
+    cachedSh = sh;
+    cachedCh = ch;
+    cachedTh = th;
+    if (scroller.classList.contains("hidden") || ch <= 0 || sh <= ch + 2 || th <= 0) {
+      hasScroll = false;
+      if (track.classList.contains("has-scroll") || track.classList.contains("visible")) {
+        track.classList.remove("has-scroll", "visible");
+      }
       return;
     }
+    hasScroll = true;
     if (!track.classList.contains("has-scroll")) track.classList.add("has-scroll");
-    const thumbH = Math.max(28, Math.round((ch / sh) * th));
-    const maxScroll = Math.max(1, sh - ch);
-    const maxY = Math.max(0, th - thumbH);
-    const ratio = Math.min(1, Math.max(0, scroller.scrollTop / maxScroll));
-    const height = thumbH + "px";
-    const transform = `translateY(${(ratio * maxY).toFixed(1)}px)`;
-    if (height !== lastThumbHeight) { thumb.style.height = height; lastThumbHeight = height; }
-    if (transform !== lastThumbTransform) { thumb.style.transform = transform; lastThumbTransform = transform; }
+    cachedThumbH = Math.max(28, Math.round((ch / sh) * th));
+    cachedMaxScroll = Math.max(1, sh - ch);
+    cachedMaxY = Math.max(0, th - cachedThumbH);
+    const height = cachedThumbH + "px";
+    if (height !== lastThumbHeight) {
+      thumb.style.height = height;
+      lastThumbHeight = height;
+    }
+    syncThumbPos();
   };
 
-  const scheduleUpdate = () => {
-    if (!rafId) rafId = requestAnimationFrame(update);
+  const scheduleMeasure = () => {
+    if (!measureRafId) measureRafId = requestAnimationFrame(measure);
+  };
+
+  const scheduleResizeMeasure = () => {
+    if (resizeTimer) return;
+    const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+    const delay = now - lastScrollTs < 220 ? 180 : 60;
+    resizeTimer = setTimeout(() => {
+      resizeTimer = 0;
+      scheduleMeasure();
+    }, delay);
+  };
+
+  const scheduleScroll = () => {
+    if (!hasScroll) {
+      scheduleMeasure();
+      return;
+    }
+    if (!scrollRafId) scrollRafId = requestAnimationFrame(syncThumbPos);
   };
 
   scroller.addEventListener("scroll", () => {
-    scheduleUpdate();
+    lastScrollTs = typeof performance !== "undefined" ? performance.now() : Date.now();
+    scheduleScroll();
     pingVisible();
   }, { passive: true });
 
   scroller.addEventListener("pointerenter", () => {
-    scheduleUpdate();
+    scheduleMeasure();
     pingVisible();
   }, { passive: true });
 
@@ -5821,9 +8323,12 @@ function attachOverlayScrollbar(scroller, host, { top = 8, bottom = 8, right = 4
     if (ev.button !== 0) return;
     ev.preventDefault();
     ev.stopPropagation();
+    measure();
     dragging = true;
     dragStartY = ev.clientY;
     dragStartScroll = scroller.scrollTop;
+    dragMaxY = Math.max(1, cachedTh - cachedThumbH);
+    dragMaxScroll = Math.max(1, cachedSh - cachedCh);
     track.classList.add("dragging", "visible");
     clearTimeout(hideTimer);
     thumb.setPointerCapture(ev.pointerId);
@@ -5831,19 +8336,24 @@ function attachOverlayScrollbar(scroller, host, { top = 8, bottom = 8, right = 4
 
   thumb.addEventListener("pointermove", (ev) => {
     if (!dragging) return;
-    const sh = scroller.scrollHeight;
-    const ch = scroller.clientHeight;
-    const th = track.clientHeight;
-    const thumbH = thumb.offsetHeight || 28;
-    const maxY = Math.max(1, th - thumbH);
-    const maxScroll = Math.max(1, sh - ch);
-    const dy = ev.clientY - dragStartY;
-    scroller.scrollTop = dragStartScroll + (dy / maxY) * maxScroll;
+    dragPendingY = ev.clientY;
+    if (!dragRafId) {
+      dragRafId = requestAnimationFrame(() => {
+        dragRafId = 0;
+        if (!dragging) return;
+        const dy = dragPendingY - dragStartY;
+        scroller.scrollTop = dragStartScroll + (dy / dragMaxY) * dragMaxScroll;
+      });
+    }
   });
 
   const endDrag = () => {
     if (!dragging) return;
     dragging = false;
+    if (dragRafId) {
+      cancelAnimationFrame(dragRafId);
+      dragRafId = 0;
+    }
     track.classList.remove("dragging");
     pingVisible();
   };
@@ -5853,34 +8363,34 @@ function attachOverlayScrollbar(scroller, host, { top = 8, bottom = 8, right = 4
   track.addEventListener("pointerdown", (ev) => {
     if (ev.target === thumb || ev.button !== 0) return;
     ev.preventDefault();
+    measure();
     const rect = track.getBoundingClientRect();
-    const thumbH = thumb.offsetHeight || 28;
-    const clickY = ev.clientY - rect.top - thumbH / 2;
-    const maxY = Math.max(1, rect.height - thumbH);
+    const clickY = ev.clientY - rect.top - cachedThumbH / 2;
+    const maxY = Math.max(1, rect.height - cachedThumbH);
     const ratio = Math.min(1, Math.max(0, clickY / maxY));
-    scroller.scrollTo({ top: ratio * (scroller.scrollHeight - scroller.clientHeight), behavior: preferredScrollBehavior() });
+    scroller.scrollTo({ top: ratio * cachedMaxScroll, behavior: preferredScrollBehavior() });
     pingVisible();
   });
 
   if (typeof ResizeObserver !== "undefined") {
-    const ro = new ResizeObserver(scheduleUpdate);
+    const ro = new ResizeObserver(scheduleResizeMeasure);
     ro.observe(scroller);
     if (scroller.firstElementChild) ro.observe(scroller.firstElementChild);
   }
-  if (typeof MutationObserver !== "undefined") {
-    const mo = new MutationObserver(scheduleUpdate);
-    mo.observe(scroller, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
-  }
-  window.addEventListener("resize", scheduleUpdate, { passive: true });
-  window.addEventListener("k1tty:appearancechange", scheduleUpdate);
-  scheduleUpdate();
-  return { update: scheduleUpdate, track };
+  window.addEventListener("resize", scheduleResizeMeasure, { passive: true });
+  window.addEventListener("k1tty:appearancechange", scheduleMeasure);
+  scheduleMeasure();
+  return {
+    update: scheduleMeasure,
+    getMetrics: () => ({ sh: cachedSh, ch: cachedCh, hasScroll }),
+    track,
+  };
 }
 
 function initCustomScrollbars() {
-  attachOverlayScrollbar($("#feedScroll"), $("#chatWrap"), { top: 8, bottom: 8, right: 4 });
-  attachOverlayScrollbar($("#overviewPane"), $(".main-body"), { top: 8, bottom: 8, right: 4 });
-  attachOverlayScrollbar($("#convList"), $("#convListWrap"), { top: 4, bottom: 8, right: 2 });
+  feedScrollbar = attachOverlayScrollbar($("#feedScroll"), $("#chatWrap"), { top: 8, bottom: 8, right: 4 });
+  overviewScrollbar = attachOverlayScrollbar($("#overviewPane"), $(".main-body"), { top: 8, bottom: 8, right: 4 });
+  convListScrollbar = attachOverlayScrollbar($("#convList"), $("#convListWrap"), { top: 4, bottom: 8, right: 2 });
 }
 
 const PINNED_KEY = "k1tty_pins_v1";
@@ -6095,8 +8605,8 @@ function setFullTextMode(on) {
     clearTimeout(fullTextTimer);
     fullTextLoading = false;
     fullTextResults = [];
+    renderSidebar();
   }
-  renderSidebar();
 }
 
 function scheduleGlobalSearch() {
@@ -6135,17 +8645,134 @@ $("#searchFullTextBtn")?.addEventListener("click", () => {
 });
 
 let threadFindMatches = [];
+let threadFindTotal = 0;
 let threadFindIndex = -1;
 let threadFindTimer = 0;
 let threadFindSeq = 0;
+let threadJumpSeq = 0;
+let threadFindWholeWord = false;
+let activeFindEl = null;
+let autoOpenedFindDetails = [];
+
+function clearThreadSearchHighlights() {
+  const feed = $("#chatFeed");
+  if (!feed || typeof feed.querySelectorAll !== "function") return;
+  const marks = feed.querySelectorAll("mark.find-hl");
+  if (!marks.length) return;
+  const parents = new Set();
+  for (const mark of marks) {
+    const parent = mark.parentNode;
+    if (!parent) continue;
+    parents.add(parent);
+    parent.replaceChild(document.createTextNode(mark.textContent || ""), mark);
+  }
+  for (const parent of parents) {
+    if (typeof parent.normalize === "function") parent.normalize();
+  }
+}
+
+function buildThreadSearchRegex(query, wholeWord) {
+  const tokens = String(query || "").trim().split(/\s+/).filter(Boolean);
+  if (!tokens.length) return null;
+  const uniq = [...new Set(tokens)].sort((a, b) => b.length - a.length);
+  const alt = uniq.map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+  if (wholeWord) {
+    try {
+      return new RegExp(`(?<![\\p{L}\\p{N}_])(?:${alt})(?![\\p{L}\\p{N}_])`, "giu");
+    } catch {
+      try {
+        return new RegExp(`\\b(?:${alt})\\b`, "gi");
+      } catch {}
+    }
+  }
+  try {
+    return new RegExp(`(?:${alt})`, "gi");
+  } catch {
+    return null;
+  }
+}
+
+function applyThreadSearchHighlights(query, wholeWord, activeRow) {
+  clearThreadSearchHighlights();
+  if (typeof document.createTreeWalker !== "function" || typeof NodeFilter === "undefined") return;
+  const rx = buildThreadSearchRegex(query, wholeWord);
+  if (!rx) return;
+  const feed = $("#chatFeed");
+  if (!feed || typeof feed.querySelectorAll !== "function") return;
+  const bodies = feed.querySelectorAll(".msg-body, .tool-body");
+  for (const body of bodies) {
+    const isActiveRow = !!(activeRow && (activeRow === body.parentElement || activeRow.contains(body)));
+    const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        if (!node.nodeValue || !node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
+        let p = node.parentElement;
+        while (p && p !== body) {
+          const tag = p.tagName;
+          if (tag === "SCRIPT" || tag === "STYLE" || tag === "MARK" || tag === "BUTTON") {
+            return NodeFilter.FILTER_REJECT;
+          }
+          if (p.classList && (p.classList.contains("katex") || p.classList.contains("md-expand-bar") || p.classList.contains("clamp-bar"))) {
+            return NodeFilter.FILTER_REJECT;
+          }
+          p = p.parentElement;
+        }
+        return NodeFilter.FILTER_ACCEPT;
+      },
+    });
+    const textNodes = [];
+    let cur;
+    while ((cur = walker.nextNode())) textNodes.push(cur);
+    for (const textNode of textNodes) {
+      const val = textNode.nodeValue;
+      rx.lastIndex = 0;
+      let m = rx.exec(val);
+      if (!m) continue;
+      const frag = document.createDocumentFragment();
+      let lastIdx = 0;
+      while (m) {
+        if (!m[0].length) {
+          rx.lastIndex++;
+          m = rx.exec(val);
+          continue;
+        }
+        if (m.index > lastIdx) {
+          frag.appendChild(document.createTextNode(val.slice(lastIdx, m.index)));
+        }
+        const mark = document.createElement("mark");
+        mark.className = isActiveRow ? "find-hl find-hl-active" : "find-hl";
+        mark.textContent = m[0];
+        frag.appendChild(mark);
+        lastIdx = m.index + m[0].length;
+        m = rx.exec(val);
+      }
+      if (lastIdx < val.length) {
+        frag.appendChild(document.createTextNode(val.slice(lastIdx)));
+      }
+      textNode.parentNode?.replaceChild(frag, textNode);
+    }
+  }
+}
 
 function clearThreadFindMarks() {
-  $$("#chatFeed .msg-block.find-active").forEach((el) => el.classList.remove("find-active"));
+  if (activeFindEl) {
+    activeFindEl.classList.remove("find-active");
+    activeFindEl = null;
+  }
+  if (autoOpenedFindDetails.length) {
+    for (const d of autoOpenedFindDetails) {
+      if (d?.isConnected) d.open = false;
+    }
+    autoOpenedFindDetails = [];
+  }
+  clearThreadSearchHighlights();
 }
 
 function closeThreadSearch() {
   clearTimeout(threadFindTimer);
+  threadFindSeq++;
+  threadJumpSeq++;
   threadFindMatches = [];
+  threadFindTotal = 0;
   threadFindIndex = -1;
   clearThreadFindMarks();
   const bar = $("#threadSearchBar");
@@ -6154,7 +8781,7 @@ function closeThreadSearch() {
   if (count) count.textContent = "";
 }
 
-function openThreadSearch(prefill = "") {
+function openThreadSearch(prefill = "", { autoJump = true } = {}) {
   if (!STATE.active || STATE.active.readonlyBackup) return;
   const bar = $("#threadSearchBar");
   const input = $("#threadSearchInput");
@@ -6163,38 +8790,87 @@ function openThreadSearch(prefill = "") {
   if (prefill) input.value = prefill;
   input.focus({ preventScroll: true });
   input.select();
-  if (input.value.trim()) scheduleThreadSearch();
+  if (input.value.trim()) scheduleThreadSearch({ autoJump });
 }
 
-async function jumpToMessageKey(key) {
+function scrollBlockIntoView(el) {
+  if (!el) return;
+  el.scrollIntoView({ behavior: "auto", block: "center" });
+}
+
+async function jumpToMessageKey(key, kind = "") {
   if (!key || !STATE.active) return;
-  const findEl = () => $(`#chatFeed [data-key="${CSS.escape(key)}"]`);
+  const jumpSeq = ++threadJumpSeq;
+  const context = STATE.active;
+  const stale = () => jumpSeq !== threadJumpSeq || STATE.active !== context;
+  const findEl = () => feedRowMap.get(String(key)) || $(`#chatFeed [data-key="${CSS.escape(key)}"]`);
+
+  const focusFound = (el) => {
+    if (!el || stale()) return;
+    clearThreadFindMarks();
+    activeFindEl = el;
+    el.classList.add("find-active");
+    hydrateToolBlock(el, { highlight: false });
+    const opened = [];
+    el.querySelectorAll("details").forEach((d) => {
+      if (!d.open) {
+        d.open = true;
+        opened.push(d);
+      }
+    });
+    autoOpenedFindDetails = opened;
+    const q = ($("#threadSearchInput")?.value || "").trim();
+    if (q) applyThreadSearchHighlights(q, threadFindWholeWord, el);
+    const activeMark = el.querySelector("mark.find-hl-active");
+    const scroll = $("#feedScroll");
+    if (activeMark && scroll && (el.offsetHeight > scroll.clientHeight * 0.7 || el.getBoundingClientRect().height > scroll.clientHeight * 0.7)) {
+      scrollBlockIntoView(activeMark);
+    } else {
+      scrollBlockIntoView(el);
+    }
+    updateScrollBtn();
+    feedScrollbar?.update();
+  };
+
   let el = findEl();
-  if (!el && !STATE.showSys) {
+  if (el) {
+    focusFound(el);
+    return;
+  }
+
+  const targetShowSys = STATE.showSys || (!!kind && kind !== "user" && kind !== "assistant");
+  if (targetShowSys && !STATE.showSys) {
     STATE.showSys = true;
     syncSysButton();
-    await refreshCurrentTranscript();
-    el = findEl();
   }
-  let guard = 0;
-  while (!el && STATE.active?.hasMore && guard < 12) {
-    guard++;
-    const loadBtn = $("#moreWrap button");
-    if (!loadBtn) break;
-    loadBtn.click();
-    await new Promise((r) => setTimeout(r, 140));
-    let wait = 0;
-    while (STATE.active?.paging && wait < 40) {
-      wait++;
-      await new Promise((r) => setTimeout(r, 60));
+
+  const token = ++STATE.loadingThreadToken;
+  beginThreadTransition(token, { update: !!context.hasRendered });
+  try {
+    const page = await rpc("entries", context.provider, {
+      cid: context.id,
+      around_key: String(key),
+      limit: 80,
+      include_tools: targetShowSys,
+    });
+    if (stale() || token !== STATE.loadingThreadToken) return;
+    context.transcriptCache?.clear();
+    const committed = await applyTranscriptResponse(page, {
+      preserve: false,
+      showSys: targetShowSys,
+      scrollMode: "none",
+      windowKey: String(key),
+    });
+    if (!committed || stale()) return;
+    el = findEl();
+    if (el) focusFound(el);
+  } catch (e) {
+    if (!stale() && token === STATE.loadingThreadToken) {
+      toast(e?.message || String(e), "err");
     }
-    el = findEl();
+  } finally {
+    finishThreadTransition(token);
   }
-  if (!el) return;
-  clearThreadFindMarks();
-  el.classList.add("find-active");
-  el.querySelectorAll("details").forEach((d) => { d.open = true; });
-  el.scrollIntoView({ behavior: preferredScrollBehavior(), block: "center" });
 }
 
 function syncThreadFindCount() {
@@ -6209,21 +8885,26 @@ function syncThreadFindCount() {
     el.textContent = t("find_no_matches");
     return;
   }
-  el.textContent = `${threadFindIndex + 1} / ${threadFindMatches.length}`;
+  const base = `${threadFindIndex + 1} / ${threadFindMatches.length}`;
+  el.textContent = threadFindTotal > threadFindMatches.length ? `${base} (${threadFindTotal})` : base;
 }
 
 function stepThreadMatch(delta) {
   if (!threadFindMatches.length) return;
   threadFindIndex = (threadFindIndex + delta + threadFindMatches.length) % threadFindMatches.length;
   syncThreadFindCount();
-  jumpToMessageKey(threadFindMatches[threadFindIndex].key);
+  const match = threadFindMatches[threadFindIndex];
+  jumpToMessageKey(match.key, match.kind);
 }
 
-function scheduleThreadSearch() {
+function scheduleThreadSearch({ autoJump = true } = {}) {
   clearTimeout(threadFindTimer);
+  threadJumpSeq++;
   const q = ($("#threadSearchInput")?.value || "").trim();
   if (!q || !STATE.active || STATE.active.readonlyBackup) {
+    threadFindSeq++;
     threadFindMatches = [];
+    threadFindTotal = 0;
     threadFindIndex = -1;
     clearThreadFindMarks();
     syncThreadFindCount();
@@ -6231,23 +8912,44 @@ function scheduleThreadSearch() {
   }
   const seq = ++threadFindSeq;
   const { provider, id } = STATE.active;
+  const includeTools = !!STATE.showSys;
+  const wholeWord = threadFindWholeWord;
   threadFindTimer = setTimeout(async () => {
     try {
-      const res = await rpc("search_thread", provider, { cid: id, query: q });
+      const res = await rpc("search_thread", provider, { cid: id, query: q, include_tools: includeTools, whole_word: wholeWord });
       if (seq !== threadFindSeq) return;
       threadFindMatches = Array.isArray(res?.matches) ? res.matches : [];
-      threadFindIndex = threadFindMatches.length ? 0 : -1;
-      syncThreadFindCount();
-      if (threadFindIndex >= 0) jumpToMessageKey(threadFindMatches[0].key);
-      else clearThreadFindMarks();
+      threadFindTotal = Number(res?.total) || threadFindMatches.length;
+      if (autoJump) {
+        threadFindIndex = threadFindMatches.length ? threadFindMatches.length - 1 : -1;
+        syncThreadFindCount();
+        if (threadFindIndex >= 0) {
+          const match = threadFindMatches[threadFindIndex];
+          jumpToMessageKey(match.key, match.kind);
+        } else {
+          clearThreadFindMarks();
+        }
+      } else {
+        const activeKey = activeFindEl?.dataset?.key;
+        const idx = activeKey ? threadFindMatches.findIndex((m) => String(m.key) === activeKey) : -1;
+        threadFindIndex = idx >= 0 ? idx : (threadFindMatches.length ? threadFindMatches.length - 1 : -1);
+        syncThreadFindCount();
+        if (threadFindIndex >= 0) {
+          applyThreadSearchHighlights(q, threadFindWholeWord, activeFindEl);
+        } else {
+          clearThreadFindMarks();
+        }
+      }
     } catch {
       if (seq === threadFindSeq) {
         threadFindMatches = [];
+        threadFindTotal = 0;
         threadFindIndex = -1;
+        clearThreadFindMarks();
         syncThreadFindCount();
       }
     }
-  }, 180);
+  }, 260);
 }
 
 $("#threadFindBtn")?.addEventListener("click", () => {
@@ -6256,7 +8958,17 @@ $("#threadFindBtn")?.addEventListener("click", () => {
   else openThreadSearch();
 });
 $("#threadSearchClose")?.addEventListener("click", closeThreadSearch);
-$("#threadSearchInput")?.addEventListener("input", scheduleThreadSearch);
+$("#threadSearchInput")?.addEventListener("input", () => scheduleThreadSearch());
+$("#threadSearchWordBtn")?.addEventListener("click", () => {
+  threadFindWholeWord = !threadFindWholeWord;
+  const btn = $("#threadSearchWordBtn");
+  if (btn) {
+    btn.setAttribute("aria-pressed", String(threadFindWholeWord));
+    btn.classList.toggle("active-toggle", threadFindWholeWord);
+  }
+  scheduleThreadSearch();
+  $("#threadSearchInput")?.focus({ preventScroll: true });
+});
 $("#threadSearchInput")?.addEventListener("keydown", (ev) => {
   if (ev.key === "Escape") {
     ev.preventDefault();
@@ -6385,7 +9097,7 @@ async function openSlimModal() {
     if (heaviest.length) {
       $("#slimHeaviestWrap").classList.remove("hidden");
       $("#slimHeaviestList").innerHTML = heaviest.map((h) => `
-        <button type="button" class="slim-heavy-item" data-jump-key="${esc(h.key || "")}">
+        <button type="button" class="slim-heavy-item" data-jump-key="${esc(h.key || "")}" data-jump-kind="${esc(h.kind || "")}">
           <span class="slim-heavy-tok">~${fmtTokens(h.tokens)} ${esc(t("tok_unit"))}</span>
           <span class="slim-heavy-prev">${esc(h.label ? `${h.label}: ${h.preview}` : h.preview)}</span>
         </button>`).join("");
@@ -6441,7 +9153,7 @@ $("#slimHeaviestList")?.addEventListener("click", (ev) => {
   const row = ev.target.closest("[data-jump-key]");
   if (!row || !row.dataset.jumpKey) return;
   closeModal("slimModal");
-  jumpToMessageKey(row.dataset.jumpKey);
+  jumpToMessageKey(row.dataset.jumpKey, row.dataset.jumpKind || "");
 });
 $("#slimApplyBtn")?.addEventListener("click", (ev) => {
   ev.stopPropagation();
@@ -6461,6 +9173,7 @@ function buildCmdEntries(rawQuery) {
   const out = [];
   const actions = [
     { group: "actions", icon: "sliders", title: t("palette_open_settings"), meta: "", run: () => window.K1ttyAppearance?.open() },
+    { group: "actions", icon: "sparkles", title: t("palette_open_generate"), meta: "", run: () => openGenerateModal() },
     { group: "actions", icon: "upload", title: t("import_k1tty"), meta: "", run: () => openImportModal() },
     { group: "actions", icon: "history", title: t("backups"), meta: "", run: () => openBackups("all", null) },
     { group: "actions", icon: "file-text", title: t("palette_toggle_fulltext"), meta: "Ctrl+Shift+F", run: () => { toggleDrawer(true); setFullTextMode(true); $("#searchInput")?.focus(); } },
@@ -6600,6 +9313,10 @@ window.addEventListener("k1tty:palette", () => {
 
 window.addEventListener("k1tty:appearancechange", () => {
   syncOptionalHeaderTools();
+  const prefs = window.K1ttyAppearance?.getSettings?.();
+  if (prefs?.showTokenCounter !== false && !lastContextStats && STATE.active && !STATE.active.readonlyBackup) {
+    loadContextStats(STATE.active.provider, STATE.active.id, STATE.loadingThreadToken);
+  }
 });
 
 document.addEventListener("keydown", (ev) => {

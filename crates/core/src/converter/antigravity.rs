@@ -81,37 +81,275 @@ fn template(root: &Path) -> Template {
     tpl
 }
 
-fn merge(entries: &[Value], times: &[f64]) -> Vec<(Value, f64, String)> {
+enum AgStep {
+    User {
+        text: String,
+        sec: f64,
+    },
+    Assistant {
+        text: String,
+        thinking: String,
+        sec: f64,
+    },
+    ToolCall {
+        thinking: String,
+        call_id: String,
+        name: String,
+        args: Value,
+        sec: f64,
+    },
+    ToolResult {
+        call_id: String,
+        name: String,
+        args: Value,
+        output: String,
+        is_error: bool,
+        verb: &'static str,
+        icon: &'static str,
+        category: &'static str,
+        standalone: bool,
+        sec: f64,
+    },
+    Compact {
+        text: String,
+        sec: f64,
+    },
+    Error {
+        text: String,
+        sec: f64,
+    },
+    System {
+        text: String,
+        sec: f64,
+    },
+}
+
+impl AgStep {
+    fn sec(&self) -> f64 {
+        match self {
+            Self::User { sec, .. }
+            | Self::Assistant { sec, .. }
+            | Self::ToolCall { sec, .. }
+            | Self::ToolResult { sec, .. }
+            | Self::Compact { sec, .. }
+            | Self::Error { sec, .. }
+            | Self::System { sec, .. } => *sec,
+        }
+    }
+}
+
+fn map_ag_tool(
+    canon: &tools::CanonicalTool,
+) -> (String, Value, &'static str, &'static str, &'static str) {
+    match canon {
+        tools::CanonicalTool::Read {
+            path,
+            start_line,
+            end_line,
+        } => {
+            let mut args = json!({"Path": path});
+            if let Some(s) = start_line {
+                args["StartLine"] = json!(s);
+            }
+            if let Some(e) = end_line {
+                args["EndLine"] = json!(e);
+            }
+            ("read_file".into(), args, "Analyzed", "description", "files")
+        }
+        tools::CanonicalTool::Edit {
+            path,
+            old_string,
+            new_string,
+            content,
+            ..
+        } => {
+            if !old_string.is_empty() {
+                (
+                    "edit_file".into(),
+                    json!({"Path": path, "Target": old_string, "Replacement": new_string}),
+                    "Edited",
+                    "edit",
+                    "edits",
+                )
+            } else {
+                let body = content.as_deref().unwrap_or(new_string.as_str());
+                (
+                    "write_file".into(),
+                    json!({"Path": path, "Content": body, "Overwrite": true}),
+                    "Created",
+                    "edit",
+                    "edits",
+                )
+            }
+        }
+        tools::CanonicalTool::Write { path, content } => (
+            "write_file".into(),
+            json!({"Path": path, "Content": content, "Overwrite": true}),
+            "Created",
+            "edit",
+            "edits",
+        ),
+        tools::CanonicalTool::Delete { path } => (
+            "run_command".into(),
+            json!({
+                "CommandLine": format!("rm -f {}", tools::shell_quote(path)),
+                "WaitMsBeforeAsync": 5000,
+                "toolSummary": format!("Remove {}", tools::basename(path)),
+            }),
+            "Ran",
+            "terminal",
+            "terminal",
+        ),
+        tools::CanonicalTool::Shell {
+            command,
+            description,
+        } => (
+            "run_command".into(),
+            json!({
+                "CommandLine": command,
+                "WaitMsBeforeAsync": 5000,
+                "toolSummary": description.as_deref().filter(|s| !s.is_empty()).map(str::to_owned).unwrap_or_else(|| shorten(command, 60)),
+            }),
+            "Ran",
+            "terminal",
+            "terminal",
+        ),
+        tools::CanonicalTool::ListDir { path, pattern } => {
+            let mut args = json!({"DirectoryPath": path});
+            if let Some(p) = pattern.as_deref().filter(|s| !s.is_empty()) {
+                args["Pattern"] = json!(p);
+            }
+            ("list_dir".into(), args, "Listed", "folder", "files")
+        }
+        tools::CanonicalTool::Grep { pattern, path } => {
+            let mut args = json!({"Query": pattern});
+            if let Some(p) = path.as_deref().filter(|s| !s.is_empty()) {
+                args["SearchPath"] = json!(p);
+            }
+            ("grep_search".into(), args, "Searched", "search", "search")
+        }
+        tools::CanonicalTool::WebSearch { query } => (
+            "search_web".into(),
+            json!({"query": query}),
+            "Searched",
+            "search",
+            "search",
+        ),
+        tools::CanonicalTool::Generic { name, args } => (
+            name.clone(),
+            if args.is_object() {
+                args.clone()
+            } else {
+                json!({})
+            },
+            "Ran",
+            "build",
+            "tools",
+        ),
+    }
+}
+
+fn build_steps(entries: &[Value], times: &[f64]) -> Vec<AgStep> {
     let mut out = Vec::new();
     let mut pending: Vec<String> = Vec::new();
-    for (e, time) in entries.iter().zip(times) {
-        let kind = s(e, "kind");
+    let flush_thinking = |out: &mut Vec<AgStep>, pending: &mut Vec<String>, sec: f64| {
+        if !pending.is_empty() {
+            out.push(AgStep::Assistant {
+                text: String::new(),
+                thinking: pending.join("\n\n"),
+                sec,
+            });
+            pending.clear();
+        }
+    };
+    let mut i = 0usize;
+    while i < entries.len() {
+        let e = &entries[i];
+        let sec = times[i];
+        let kind = nonempty(s(e, "kind")).unwrap_or_else(|| "assistant".into());
         let subtype = s(e, "subtype");
         let text = s(e, "text");
         if kind == "tool" && subtype == "thinking" {
             if !text.trim().is_empty() {
                 pending.push(text.trim().to_owned());
             }
+            i += 1;
             continue;
         }
-        if kind == "assistant" && !pending.is_empty() {
-            out.push((e.clone(), *time, pending.join("\n\n")));
-            pending.clear();
-        } else {
-            if !pending.is_empty() {
-                out.push((json!({"kind":"assistant","subtype":"planner_response","text":"","label":"thinking"}),*time,pending.join("\n\n")));
+        if kind == "assistant" {
+            i += 1;
+            let thinking = if pending.is_empty() {
+                String::new()
+            } else {
+                let joined = pending.join("\n\n");
                 pending.clear();
+                joined
+            };
+            out.push(AgStep::Assistant {
+                text,
+                thinking,
+                sec,
+            });
+            continue;
+        }
+        if kind == "tool" {
+            let inv = tools::consume_tool_pair(entries, times, &mut i);
+            let (name, args, verb, icon, category) = map_ag_tool(&inv.canonical);
+            let call_id = format!("call_{}", &uuid_hex()[..16]);
+            if inv.standalone_output {
+                flush_thinking(&mut out, &mut pending, inv.ts_call);
+                out.push(AgStep::ToolResult {
+                    call_id,
+                    name,
+                    args,
+                    output: inv.result_text,
+                    is_error: inv.is_error,
+                    verb,
+                    icon,
+                    category,
+                    standalone: true,
+                    sec: inv.ts_call,
+                });
+            } else {
+                let thinking = if pending.is_empty() {
+                    String::new()
+                } else {
+                    let joined = pending.join("\n\n");
+                    pending.clear();
+                    joined
+                };
+                out.push(AgStep::ToolCall {
+                    thinking,
+                    call_id: call_id.clone(),
+                    name: name.clone(),
+                    args: args.clone(),
+                    sec: inv.ts_call,
+                });
+                out.push(AgStep::ToolResult {
+                    call_id,
+                    name,
+                    args,
+                    output: inv.result_text,
+                    is_error: inv.is_error,
+                    verb,
+                    icon,
+                    category,
+                    standalone: false,
+                    sec: inv.ts_result.max(inv.ts_call),
+                });
             }
-            out.push((e.clone(), *time, String::new()));
+            continue;
+        }
+        i += 1;
+        flush_thinking(&mut out, &mut pending, sec);
+        match kind.as_str() {
+            "user" => out.push(AgStep::User { text, sec }),
+            "compact" => out.push(AgStep::Compact { text, sec }),
+            "error" => out.push(AgStep::Error { text, sec }),
+            _ => out.push(AgStep::System { text, sec }),
         }
     }
-    if !pending.is_empty() {
-        out.push((
-            json!({"kind":"assistant","subtype":"planner_response","text":"","label":"thinking"}),
-            *times.last().unwrap_or(&now_sec()),
-            pending.join("\n\n"),
-        ));
-    }
+    flush_thinking(&mut out, &mut pending, *times.last().unwrap_or(&now_sec()));
     out
 }
 
@@ -232,9 +470,9 @@ pub(super) fn import(
         serde_json::to_string(&vec![&ws_uri])?
     };
     let times = timestamps(&entries, now);
-    let merged = merge(&entries, &times);
-    let first = merged.first().map(|e| e.1).unwrap_or(now);
-    let last = merged.last().map(|e| e.1).unwrap_or(now);
+    let steps = build_steps(&entries, &times);
+    let first = steps.first().map(AgStep::sec).unwrap_or(now);
+    let last = steps.last().map(AgStep::sec).unwrap_or(now);
     let mut last_user_idx = -1i64;
     let mut last_user_sec = first;
     let mut preview = String::new();
@@ -259,12 +497,13 @@ pub(super) fn import(
     let mut agent_body = Vec::new();
     let mut user_offs = Vec::new();
     let mut agent_offs = Vec::new();
-    for (idx, (entry, sec, thinking)) in merged.iter().enumerate() {
-        let kind = nonempty(s(entry, "kind")).unwrap_or_else(|| "assistant".into());
-        let text = s(entry, "text");
-        let t = ts(*sec);
+    for (idx, step) in steps.iter().enumerate() {
+        let sec = step.sec();
+        let t = ts(sec);
         let req = uuid_hex();
-        if kind == "user" {
+        let is_user = matches!(step, AgStep::User { .. });
+        let is_model_step = matches!(step, AgStep::Assistant { .. } | AgStep::ToolCall { .. });
+        if is_user {
             turn_group = uuid();
         }
         let mut traj_ref = b(1, &traj);
@@ -277,114 +516,226 @@ pub(super) fn import(
             b(1, &t),
             v(
                 3,
-                match kind.as_str() {
-                    "user" => 4,
-                    "assistant" => 2,
-                    _ => 5,
+                if is_user {
+                    4
+                } else if is_model_step {
+                    2
+                } else {
+                    5
                 },
             ),
         ]
         .concat();
-        if kind == "assistant" {
+        if is_model_step {
             metadata.extend(b(6, &t));
             metadata.extend(b(7, &t));
         }
-        if kind != "user" {
+        if !is_user {
             metadata.extend(b(8, &t));
         }
         metadata.extend(b(12, &turn_group));
         metadata.extend(b(20, &traj_ref));
-        let pair = if kind == "assistant" {
+        let pair = if is_model_step {
             [b(1, [v(1, 8), b(2, &t)].concat()), done.clone()].concat()
         } else {
             done
         };
         metadata.extend(b(26, &pair));
-        if kind == "assistant" {
+        if is_model_step {
             metadata.extend(b(32, &t));
         }
-        if matches!(kind.as_str(), "user" | "assistant") {
+        if is_user || is_model_step {
             metadata.extend(b(35, &req));
         }
-        let (stype, type_name, source, content, body) = match kind.as_str() {
-            "user" => {
-                let mut user = [b(2, &text), b(3, b(1, &text)), b(4, [])].concat();
+        let mut line;
+        let (stype, body) = match step {
+            AgStep::User { text, .. } => {
+                let mut user =
+                    [b(2, text.as_bytes()), b(3, b(1, text.as_bytes())), b(4, [])].concat();
                 if !tpl.user_cfg.is_empty() {
                     user.extend(b(12, &tpl.user_cfg));
                 }
                 user.extend(b(19, uuid()));
                 last_user_idx = idx as i64;
-                last_user_sec = *sec;
+                last_user_sec = sec;
                 if preview.is_empty() {
                     preview = shorten(&text.split_whitespace().collect::<Vec<_>>().join(" "), 300);
                 }
                 user_offs.push([idx, user_body.len()]);
                 user_body.extend_from_slice(text.as_bytes());
                 user_body.push(b'\n');
-                (
-                    14,
-                    "USER_INPUT",
-                    "USER_EXPLICIT",
-                    format!("<USER_REQUEST>\n{text}\n</USER_REQUEST>"),
-                    b(19, user),
-                )
+                line = json!({
+                    "step_index": idx,
+                    "source": "USER_EXPLICIT",
+                    "type": "USER_INPUT",
+                    "status": "DONE",
+                    "created_at": iso(sec),
+                    "content": format!("<USER_REQUEST>\n{text}\n</USER_REQUEST>"),
+                });
+                (14u64, b(19, user))
             }
-            "assistant" => {
+            AgStep::Assistant { text, thinking, .. } => {
                 let mut asst = Vec::new();
                 if !text.is_empty() {
-                    asst.extend(b(1, &text));
+                    asst.extend(b(1, text.as_bytes()));
                 }
                 if !thinking.is_empty() {
-                    asst.extend(b(3, thinking));
+                    asst.extend(b(3, thinking.as_bytes()));
                 }
                 asst.extend(b(6, format!("bot-{}", uuid())));
                 if !text.is_empty() {
-                    asst.extend(b(8, &text));
+                    asst.extend(b(8, text.as_bytes()));
                     agent_offs.push([idx, agent_body.len()]);
                     agent_body.extend_from_slice(text.as_bytes());
                     agent_body.push(b'\n');
                 }
                 asst.extend(v(12, 2));
-                (15, "PLANNER_RESPONSE", "MODEL", text.clone(), b(20, asst))
+                line = json!({
+                    "step_index": idx,
+                    "source": "MODEL",
+                    "type": "PLANNER_RESPONSE",
+                    "status": "DONE",
+                    "created_at": iso(sec),
+                    "content": text,
+                });
+                if !thinking.is_empty() {
+                    line["thinking"] = json!(thinking);
+                }
+                (15u64, b(20, asst))
             }
-            "compact" => (
-                23,
-                "CHECKPOINT",
-                "SYSTEM",
-                text.clone(),
-                nested(&[30, 5], text.as_bytes()),
-            ),
-            "error" => (
-                17,
-                "ERROR_MESSAGE",
-                "SYSTEM",
-                text.clone(),
-                nested(&[24, 3, 2], text.as_bytes()),
-            ),
-            "tool" => (
-                132,
-                "GENERIC",
-                "SYSTEM",
-                text.clone(),
-                nested(&[140, 2, 1], text.as_bytes()),
-            ),
-            _ => (
-                101,
-                "SYSTEM_MESSAGE",
-                "SYSTEM",
-                text.clone(),
-                nested(&[114, 1], text.as_bytes()),
-            ),
+            AgStep::ToolCall {
+                thinking,
+                call_id,
+                name,
+                args,
+                ..
+            } => {
+                let args_json = serde_json::to_string(args)?;
+                let mut asst = Vec::new();
+                if !thinking.is_empty() {
+                    asst.extend(b(3, thinking.as_bytes()));
+                }
+                asst.extend(b(6, format!("bot-{}", uuid())));
+                let tc_pb = [
+                    b(1, call_id.as_bytes()),
+                    b(2, name.as_bytes()),
+                    b(3, args_json.as_bytes()),
+                ]
+                .concat();
+                asst.extend(b(7, &tc_pb));
+                asst.extend(v(12, 2));
+                line = json!({
+                    "step_index": idx,
+                    "source": "MODEL",
+                    "type": "PLANNER_RESPONSE",
+                    "status": "DONE",
+                    "created_at": iso(sec),
+                    "tool_calls": [{"name": name, "args": args}],
+                });
+                if !thinking.is_empty() {
+                    line["thinking"] = json!(thinking);
+                }
+                (15u64, b(20, asst))
+            }
+            AgStep::ToolResult {
+                call_id,
+                name,
+                args,
+                output,
+                is_error,
+                verb,
+                icon,
+                category,
+                standalone,
+                ..
+            } => {
+                let args_json = serde_json::to_string(args)?;
+                let tc_meta = [
+                    b(1, call_id.as_bytes()),
+                    b(2, name.as_bytes()),
+                    b(3, args_json.as_bytes()),
+                ]
+                .concat();
+                metadata.extend(b(4, &tc_meta));
+                let mut f140 = Vec::new();
+                if let Some(map) = args.as_object() {
+                    for (k, val) in map {
+                        let val_str = match val {
+                            Value::String(s) => s.clone(),
+                            Value::Null => String::new(),
+                            other => other.to_string(),
+                        };
+                        f140.extend(b(
+                            1,
+                            [b(1, k.as_bytes()), b(2, val_str.as_bytes())].concat(),
+                        ));
+                    }
+                }
+                let body_text = if output.is_empty() {
+                    "ok"
+                } else {
+                    output.as_str()
+                };
+                let ui = [
+                    b(5, verb.as_bytes()),
+                    b(6, icon.as_bytes()),
+                    b(7, category.as_bytes()),
+                ]
+                .concat();
+                let f140_2 = [b(1, body_text.as_bytes()), b(3, &ui)].concat();
+                f140.extend(b(2, &f140_2));
+                line = json!({
+                    "step_index": idx,
+                    "source": if *standalone { "SYSTEM" } else { "MODEL" },
+                    "type": "GENERIC",
+                    "status": "DONE",
+                    "created_at": iso(sec),
+                    "content": output,
+                });
+                if *is_error {
+                    line["error"] = json!(output);
+                }
+                if *standalone && !name.is_empty() {
+                    line["tool_calls"] = json!([{"name": name}]);
+                }
+                (132u64, b(140, &f140))
+            }
+            AgStep::Compact { text, .. } => {
+                line = json!({
+                    "step_index": idx,
+                    "source": "SYSTEM",
+                    "type": "CHECKPOINT",
+                    "status": "DONE",
+                    "created_at": iso(sec),
+                    "content": text,
+                });
+                (23u64, nested(&[30, 5], text.as_bytes()))
+            }
+            AgStep::Error { text, .. } => {
+                line = json!({
+                    "step_index": idx,
+                    "source": "SYSTEM",
+                    "type": "ERROR_MESSAGE",
+                    "status": "DONE",
+                    "created_at": iso(sec),
+                    "content": text,
+                });
+                (17u64, nested(&[24, 3, 2], text.as_bytes()))
+            }
+            AgStep::System { text, .. } => {
+                line = json!({
+                    "step_index": idx,
+                    "source": "SYSTEM",
+                    "type": "SYSTEM_MESSAGE",
+                    "status": "DONE",
+                    "created_at": iso(sec),
+                    "content": text,
+                });
+                (101u64, nested(&[114, 1], text.as_bytes()))
+            }
         };
         let payload = [v(1, stype), v(4, 3), b(5, &metadata), body].concat();
         tx.execute("INSERT INTO steps(idx,step_type,status,has_subtrajectory,metadata,error_details,permissions,task_details,render_info,step_payload,step_format) VALUES (?,?,3,0,?,NULL,NULL,NULL,NULL,?,0)",params![idx as i64,stype as i64,metadata,payload])?;
-        let mut line = json!({"step_index":idx,"source":source,"type":type_name,"status":"DONE","created_at":iso(*sec),"content":content});
-        if !thinking.is_empty() {
-            line["thinking"] = json!(thinking);
-        }
-        if kind == "tool" && !s(entry, "tool").is_empty() {
-            line["tool_calls"] = json!([{"name":s(entry,"tool")}]);
-        }
         lines.push(line);
     }
     let workspace = if ws_uri.is_empty() {
@@ -443,7 +794,7 @@ pub(super) fn import(
     let annotations = [b(1, &title), b(7, ts(last))].concat();
     let mut summary = [
         b(1, &title),
-        v(2, merged.len() as u64),
+        v(2, steps.len() as u64),
         b(3, ts(last)),
         b(4, &traj),
         v(5, 1),
@@ -465,7 +816,7 @@ pub(super) fn import(
     ensure_summaries(&sc)?;
     let stx = sc.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     stx.execute("INSERT OR REPLACE INTO conversation_summaries(conversation_id,title,preview,step_count,last_modified_time,workspace_uris,status,source,project_id,agent_name,parent_conversation_id,nesting_depth,battle_id,winning_conversation_id,not_fully_idle,killed,last_user_input_time,last_user_input_step_index,app_data_dir,raw_summary,group_id) VALUES (?,?,?,?,?,?,?,'',?,'','',0,'','',0,0,?,?,?,?,'')",
-        params![cid,title,if preview.is_empty(){&title}else{&preview},merged.len() as i64,ag_dt(last),ws_uris,"CASCADE_RUN_STATUS_IDLE",project,ag_dt(last_user_sec),last_user_idx,if is_cli{"antigravity-cli"}else{"antigravity"},summary])?;
+        params![cid,title,if preview.is_empty(){&title}else{&preview},steps.len() as i64,ag_dt(last),ws_uris,"CASCADE_RUN_STATUS_IDLE",project,ag_dt(last_user_sec),last_user_idx,if is_cli{"antigravity-cli"}else{"antigravity"},summary])?;
     let has_fts = stx
         .query_row(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='conversations_fts'",
@@ -480,12 +831,12 @@ pub(super) fn import(
             [&cid],
         )?;
         stx.execute("INSERT INTO conversations_fts(conversation_id,chunk_index,chunk_first_step,chunk_last_step,last_modified_time,step_count,last_step_created_at,archived,user_step_byte_offsets,agent_step_byte_offsets,title,workspace,project,user_body,agent_body) VALUES (?,0,0,?,?,?,?,0,?,?,?,?,?,?,?)",
-            params![cid,merged.len().saturating_sub(1) as i64,ag_dt(last),merged.len() as i64,ag_dt(last),serde_json::to_string(&user_offs)?,serde_json::to_string(&agent_offs)?,title,directory,project,String::from_utf8_lossy(&user_body),String::from_utf8_lossy(&agent_body)])?;
+            params![cid,steps.len().saturating_sub(1) as i64,ag_dt(last),steps.len() as i64,ag_dt(last),serde_json::to_string(&user_offs)?,serde_json::to_string(&agent_offs)?,title,directory,project,String::from_utf8_lossy(&user_body),String::from_utf8_lossy(&agent_body)])?;
     }
     stx.commit()?;
     let _ = update_summaries_proto(root, is_cli, &cid, &summary);
     guard.commit();
     Ok(
-        json!({"provider":if is_cli{"antigravity_cli"}else{"antigravity"},"cid":cid,"title":title,"entries":merged.len()}),
+        json!({"provider":if is_cli{"antigravity_cli"}else{"antigravity"},"cid":cid,"title":title,"entries":steps.len()}),
     )
 }

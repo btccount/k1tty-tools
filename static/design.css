@@ -5,22 +5,22 @@
 
  
 body { user-select: none; -webkit-user-select: none; overscroll-behavior: none; }
-input, textarea, [contenteditable="true"], .msg-body, .msg-body *,
-.tool-body, .tool-body *, .codeblock, .codeblock *, .code-block, .code-block *,
-.md-table, .md-table *, .md-quote, .md-quote *, .md-list, .md-list *,
-.msg-head .mono-tag, .preview-text, .preview-text *, .pl-txt, .pl-txt *,
-.diff-box, .diff-box *, .report-body, .report-body *, .rep-card, .rep-card *,
-.unlocker-body, .unlocker-body *, .unlocker-reason-line, .modal-body p, .modal-body code,
-.prov-row-path, .prov-row-path *, .pack-result, .pack-result *,
+input, textarea, [contenteditable="true"], .msg-body,
+.tool-body, .codeblock, .code-block,
+.md-table, .md-quote, .md-list,
+.msg-head .mono-tag, .preview-text, .pl-txt,
+.diff-box, .report-body, .rep-card,
+.unlocker-body, .unlocker-reason-line, .modal-body p, .modal-body code,
+.prov-row-path, .pack-result,
 .import-error, .notice-error, .slim-heavy-prev, .conv-snippet,
-.md-math, .md-math *, .toast > span, .modal-body li, .modal-body code, .modal-body pre {
+.md-math, .toast > span, .modal-body li, .modal-body pre {
   user-select: text;
   -webkit-user-select: text;
 }
 img, a, .topbar, .drawer-head { -webkit-user-drag: none; }
-.msg-body button, .msg-body button *, .tool-body button, .tool-body button *,
-.code-head, .code-head *, .msg-actions, .msg-actions *,
-.rep-copy-btn, .rep-copy-btn *, .md-file-ico, .md-path-ico, .md-link-ext, .prov-path-ico {
+.msg-body button, .tool-body button, .md-expand-bar,
+.code-head, .msg-actions,
+.rep-copy-btn, .md-file-ico, .md-path-ico, .md-link-ext, .prov-path-ico {
   user-select: none;
   -webkit-user-select: none;
 }

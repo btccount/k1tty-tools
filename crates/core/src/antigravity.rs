@@ -1,25 +1,34 @@
 use crate::pbwire::{self, bytes_at, encode_field, parse_fields, string_at};
-use crate::provider::{OpContext, Provider, ProviderPaths};
+use crate::provider::{truncate_preview_item, EntryRef, OpContext, Provider, ProviderPaths};
 use anyhow::{anyhow, bail, ensure, Context, Result};
 use chrono::{DateTime, Local, Utc};
 use regex::Regex;
 use rusqlite::{params, types::Value as SqlValue, Connection, OpenFlags, OptionalExtension};
 use serde_json::{json, Value};
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashMap},
     fs::{self, File, FileTimes},
-    io::Write,
+    io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc, Mutex, OnceLock,
     },
     time::{Duration, UNIX_EPOCH},
 };
 
+struct CachedTurns {
+    sig: Vec<(u128, u64)>,
+    items: Arc<Vec<Value>>,
+    turns: usize,
+    last_used: u64,
+}
+
 pub struct AntigravityProvider {
     paths: ProviderPaths,
-    turns_cache: Mutex<BTreeMap<String, (Vec<(u128, u64)>, Arc<Vec<Value>>, usize)>>,
+    turns_cache: Mutex<HashMap<String, CachedTurns>>,
+    turns_build_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
+    cache_tick: AtomicU64,
     count_cache: Mutex<BTreeMap<String, (Vec<(u128, u64)>, Option<i64>)>>,
     live_unlocked: Mutex<BTreeSet<String>>,
     auto_restart_hub: AtomicBool,
@@ -93,6 +102,85 @@ fn db_probe(db: &Path) -> Result<()> {
 }
 fn wal_checkpoint_passive(con: &Connection) {
     let _ = con.execute_batch("PRAGMA wal_checkpoint(PASSIVE);");
+}
+fn wal_checkpoint_truncate(db: &Path) {
+    if !db.is_file() {
+        return;
+    }
+    if let Ok(con) = Connection::open_with_flags(
+        db,
+        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    ) {
+        let _ = con.busy_timeout(Duration::from_millis(1500));
+        let _ = con.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+    }
+}
+fn remove_from_summaries_proto(proto_path: &Path, cid: &str) -> Result<()> {
+    if !proto_path.is_file() {
+        return Ok(());
+    }
+    let data = fs::read(proto_path)?;
+    let fields = pbwire::try_parse_fields(&data)?;
+    let mut out = Vec::with_capacity(data.len());
+    let mut removed = false;
+    for f in fields {
+        if f.number == 1
+            && f.wire_type == 2
+            && bytes_at(f.bytes().unwrap_or_default(), &[1]).as_deref() == Some(cid.as_bytes())
+        {
+            removed = true;
+            continue;
+        }
+        out.extend_from_slice(&f.raw);
+    }
+    if removed {
+        atomic(proto_path, &out)?;
+    }
+    Ok(())
+}
+fn update_summaries_proto_counts(
+    proto_path: &Path,
+    cid: &str,
+    step_count: u64,
+    last_user: u64,
+) -> Result<()> {
+    if !proto_path.is_file() {
+        return Ok(());
+    }
+    let data = fs::read(proto_path)?;
+    let fields = pbwire::try_parse_fields(&data)?;
+    let mut out = Vec::with_capacity(data.len());
+    let mut changed = false;
+    let updates = BTreeMap::from([(2, step_count), (16, last_user)]);
+    for f in fields {
+        if f.number == 1 && f.wire_type == 2 {
+            let entry_bytes = f.bytes().unwrap_or_default();
+            if bytes_at(entry_bytes, &[1]).as_deref() == Some(cid.as_bytes()) {
+                let mut new_entry = Vec::with_capacity(entry_bytes.len());
+                let mut patched_summary = false;
+                for ef in pbwire::try_parse_fields(entry_bytes)? {
+                    if ef.number == 2 && ef.wire_type == 2 {
+                        let patched =
+                            pbwire::patch_varints(ef.bytes().unwrap_or_default(), &updates);
+                        new_entry.extend(encode_field(2, 2, &patched));
+                        patched_summary = true;
+                    } else {
+                        new_entry.extend_from_slice(&ef.raw);
+                    }
+                }
+                if patched_summary {
+                    out.extend(encode_field(1, 2, &new_entry));
+                    changed = true;
+                    continue;
+                }
+            }
+        }
+        out.extend_from_slice(&f.raw);
+    }
+    if changed {
+        atomic(proto_path, &out)?;
+    }
+    Ok(())
 }
 fn sql_bytes(v: &SqlValue) -> Vec<u8> {
     match v {
@@ -343,7 +431,7 @@ fn copy_db(src: &Path, dst: &Path) -> Result<()> {
     {
         let mut dest = Connection::open(temp.path())?;
         let backup = rusqlite::backup::Backup::new(&src_con, &mut dest)?;
-        backup.run_to_completion(128, Duration::from_millis(5), None)?;
+        backup.run_to_completion(2048, Duration::ZERO, None)?;
     }
     temp.flush()?;
     temp.as_file().sync_all()?;
@@ -376,6 +464,31 @@ fn restore_db_safe(src: &Path, dst: &Path) -> Result<()> {
     wal_checkpoint_passive(&dst_con);
     Ok(())
 }
+fn visit_jsonl_values(path: &Path, mut f: impl FnMut(Value) -> bool) {
+    let Ok(file) = File::open(path) else {
+        return;
+    };
+    let mut reader = BufReader::with_capacity(256 * 1024, file);
+    let mut buf = String::new();
+    loop {
+        buf.clear();
+        let Ok(n) = reader.read_line(&mut buf) else {
+            break;
+        };
+        if n == 0 {
+            break;
+        }
+        let line = buf.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if let Ok(v) = serde_json::from_str::<Value>(line) {
+            if !f(v) {
+                break;
+            }
+        }
+    }
+}
 fn read_lines(path: &Path) -> Vec<String> {
     fs::read(path)
         .map(|b| {
@@ -388,10 +501,12 @@ fn read_lines(path: &Path) -> Vec<String> {
         .unwrap_or_default()
 }
 fn read_values(path: &Path) -> Vec<Value> {
-    read_lines(path)
-        .into_iter()
-        .filter_map(|l| serde_json::from_str(&l).ok())
-        .collect()
+    let mut out = Vec::new();
+    visit_jsonl_values(path, |v| {
+        out.push(v);
+        true
+    });
+    out
 }
 fn read_value(path: &Path) -> Value {
     fs::read(path)
@@ -477,19 +592,22 @@ fn service_text(t: i64, p: &[u8]) -> Option<(Vec<u32>, String)> {
     })
 }
 fn extract_request(s: &str) -> String {
-    Regex::new(r"(?s)<USER_REQUEST>(.*?)</USER_REQUEST>")
-        .unwrap()
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"(?s)<USER_REQUEST>(.*?)</USER_REQUEST>").unwrap())
         .captures(s)
         .and_then(|c| c.get(1))
         .map(|m| m.as_str().trim().to_owned())
         .unwrap_or_else(|| s.trim().to_owned())
 }
 fn clean_user(s: &str) -> String {
+    static RE: OnceLock<Regex> = OnceLock::new();
     if s.contains("<USER_REQUEST>") {
         return extract_request(s);
     }
-    let cleaned = Regex::new(r"(?s)<ADDITIONAL_METADATA>.*?</ADDITIONAL_METADATA>\s*")
-        .unwrap()
+    let cleaned = RE
+        .get_or_init(|| {
+            Regex::new(r"(?s)<ADDITIONAL_METADATA>.*?</ADDITIONAL_METADATA>\s*").unwrap()
+        })
         .replace_all(s, "")
         .trim()
         .to_owned();
@@ -584,7 +702,9 @@ impl AntigravityProvider {
     pub fn new(paths: ProviderPaths) -> Self {
         Self {
             paths,
-            turns_cache: Mutex::new(BTreeMap::new()),
+            turns_cache: Mutex::new(HashMap::new()),
+            turns_build_locks: Mutex::new(HashMap::new()),
+            cache_tick: AtomicU64::new(0),
             count_cache: Mutex::new(BTreeMap::new()),
             live_unlocked: Mutex::new(BTreeSet::new()),
             auto_restart_hub: AtomicBool::new(false),
@@ -623,6 +743,19 @@ impl AntigravityProvider {
             .join("annotations")
             .join(format!("{cid}.pbtxt"))
     }
+    fn summaries_proto_path(&self) -> PathBuf {
+        self.paths.root.join(if self.paths.id == "antigravity_cli" {
+            "jetbox_summaries_proto.pb"
+        } else {
+            "agyhub_summaries_proto.pb"
+        })
+    }
+    fn chapter_title_path(&self, cid: &str) -> PathBuf {
+        self.paths
+            .root
+            .join("chapter_titles")
+            .join(format!("{cid}.pb"))
+    }
     fn test_mode(&self) -> bool {
         std::env::var("ANTIGRAVITY_WEB_TEST").as_deref() == Ok("1")
             && self
@@ -660,6 +793,37 @@ impl AntigravityProvider {
     }
     pub fn read_history(&self, cid: &str) -> Vec<Value> {
         read_values(&self.history_path(cid))
+    }
+    fn find_history_step(&self, cid: &str, idx: i64) -> Option<Value> {
+        let path = self.history_path(cid);
+        let Ok(file) = File::open(&path) else {
+            return None;
+        };
+        let mut reader = BufReader::with_capacity(256 * 1024, file);
+        let mut buf = String::new();
+        let needle = idx.to_string();
+        loop {
+            buf.clear();
+            let Ok(n) = reader.read_line(&mut buf) else {
+                break;
+            };
+            if n == 0 {
+                break;
+            }
+            if !buf.contains(&needle) {
+                continue;
+            }
+            let line = buf.trim();
+            if line.is_empty() {
+                continue;
+            }
+            if let Ok(v) = serde_json::from_str::<Value>(line) {
+                if num(&v["step_index"]) == idx {
+                    return Some(v);
+                }
+            }
+        }
+        None
     }
     fn presence_guard(&self, cid: &str) -> Result<Option<File>> {
         safe_id(cid)?;
@@ -741,8 +905,16 @@ impl AntigravityProvider {
             return (false, Vec::new());
         }
         let Ok(res) = self.restart_hub(cid) else {
+            if let Some(c) = cid {
+                wal_checkpoint_truncate(&self.db(c));
+            }
+            wal_checkpoint_truncate(&self.summaries());
             return (false, Vec::new());
         };
+        if let Some(c) = cid {
+            wal_checkpoint_truncate(&self.db(c));
+        }
+        wal_checkpoint_truncate(&self.summaries());
         let pids: Vec<u32> = res["pids"]
             .as_array()
             .map(|arr| {
@@ -844,6 +1016,10 @@ impl AntigravityProvider {
                 std::thread::sleep(Duration::from_millis(100));
             }
         }
+        if let Some(c) = cid {
+            wal_checkpoint_truncate(&self.db(c));
+        }
+        wal_checkpoint_truncate(&self.summaries());
         crate::process::snapshot_force(true);
         if let Some(c) = cid {
             if !self.is_presence_locked(c) {
@@ -898,15 +1074,31 @@ impl AntigravityProvider {
         }
         Ok((guard, warns))
     }
+    fn any_presence_lock_active(&self) -> bool {
+        let pdir = self.paths.root.join("presence");
+        let Ok(entries) = fs::read_dir(&pdir) else {
+            return false;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|x| x.to_str()) != Some("lock") {
+                continue;
+            }
+            if let Some(cid) = path.file_stem().and_then(|x| x.to_str()) {
+                if !self.is_effective_live_unlocked(cid) && self.presence_guard(cid).is_err() {
+                    return true;
+                }
+            }
+        }
+        false
+    }
     fn state(&self) -> Value {
         let running = self.running();
         let avail = self.conv_dir().is_dir();
         let blocked = !self.test_mode()
+            && !self.is_auto_restart_hub()
             && !running.is_empty()
-            && file_list(&self.conv_dir())
-                .iter()
-                .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("db"))
-                .any(|p| db_probe(p).is_err());
+            && (db_probe(&self.summaries()).is_err() || self.any_presence_lock_active());
         let note = if !avail {
             format!("Каталог не найден: {}", self.paths.root.display())
         } else if self.test_mode() {
@@ -1007,27 +1199,23 @@ impl AntigravityProvider {
         }
         map
     }
-    fn entry(&self, e: &Value, types: &BTreeMap<i64, i64>, readonly: bool) -> Value {
+    fn entry_fields(
+        &self,
+        e: &Value,
+    ) -> (
+        i64,
+        &'static str,
+        &'static str,
+        String,
+        String,
+        String,
+        Value,
+    ) {
         let orig_kind = kind(&e["type"]);
         let idx = num(&e["step_index"]);
-        let stype = types.get(&idx);
         let tools = tool_names(e);
         let content = txt(e, "content");
         let thinking = txt(e, "thinking").trim();
-        let mut actions = Vec::<&str>::new();
-        if !readonly {
-            if stype == Some(&14)
-                || (stype == Some(&15)
-                    && (!content.trim().is_empty() || !tools.is_empty() || !thinking.is_empty()))
-                || (stype.is_some_and(|t| service_spec(*t).is_some()) && !content.trim().is_empty())
-            {
-                actions.push("edit");
-            }
-            if orig_kind == "user" {
-                actions.push("cut_head");
-            }
-            actions.push("cut_tail");
-        }
         let tool_only = orig_kind == "assistant" && content.trim().is_empty() && !tools.is_empty();
         let thinking_only = orig_kind == "assistant"
             && content.trim().is_empty()
@@ -1108,70 +1296,163 @@ impl AntigravityProvider {
                 },
             )
         };
+        (idx, orig_kind, k, subtype, label, text, tool_field)
+    }
+    fn entry(&self, e: &Value, types: &BTreeMap<i64, i64>, readonly: bool) -> Value {
+        let (idx, orig_kind, k, subtype, label, text, tool_field) = self.entry_fields(e);
+        let stype = types.get(&idx);
+        let content = txt(e, "content");
+        let thinking = txt(e, "thinking").trim();
+        let has_tools = e["tool_calls"].as_array().is_some_and(|a| !a.is_empty());
+        let mut actions = Vec::<&str>::new();
+        if !readonly {
+            if stype == Some(&14)
+                || (stype == Some(&15)
+                    && (!content.trim().is_empty() || has_tools || !thinking.is_empty()))
+                || (stype.is_some_and(|t| service_spec(*t).is_some()) && !content.trim().is_empty())
+            {
+                actions.push("edit");
+            }
+            if orig_kind == "user" {
+                actions.push("cut_head");
+            }
+            actions.push("cut_tail");
+        }
         json!({"key":idx.to_string(),"step_index":e["step_index"],"kind":k,"subtype":subtype,"label":label,"text":text,"ts":txt(e,"created_at"),"tool":tool_field,"status":e["status"],"in_db":readonly||stype.is_some(),"actions":actions})
     }
     fn flat_entries(&self, cid: &str) -> (Arc<Vec<Value>>, usize) {
+        let history_path = self.history_path(cid);
+        let db_path = self.db(cid);
         let sig = vec![
-            stat_signature(&self.history_path(cid)),
-            stat_signature(&self.db(cid)),
-            stat_signature(&PathBuf::from(format!("{}-wal", self.db(cid).display()))),
+            stat_signature(&history_path),
+            stat_signature(&db_path),
+            stat_signature(&PathBuf::from(format!("{}-wal", db_path.display()))),
         ];
-        if let Some((_, items, turns)) = self
-            .turns_cache
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(cid)
-            .filter(|(s, _, _)| s == &sig)
         {
-            return (Arc::clone(items), *turns);
-        }
-        let types = self.db_types(cid);
-        let history = self.read_history(cid);
-        let mut turns = 0;
-        let entries = history
-            .iter()
-            .enumerate()
-            .map(|(i, e)| {
-                if i == 0 || kind(&e["type"]) == "user" {
-                    turns += 1;
-                }
-                self.entry(e, &types, false)
-            })
-            .collect();
-        let entries = Arc::new(entries);
-        let mut cache = self.turns_cache.lock().unwrap_or_else(|e| e.into_inner());
-        if cache.len() >= 8 {
-            if let Some(key) = cache.keys().next().cloned() {
-                cache.remove(&key);
+            let mut cache = self.turns_cache.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(cached) = cache.get_mut(cid).filter(|c| c.sig == sig) {
+                cached.last_used = self.cache_tick.fetch_add(1, Ordering::Relaxed) + 1;
+                return (Arc::clone(&cached.items), cached.turns);
             }
         }
-        cache.insert(cid.to_owned(), (sig, Arc::clone(&entries), turns));
+        let build_lock = {
+            let mut locks = self
+                .turns_build_locks
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            if locks.len() > 32 {
+                locks.retain(|_, v| Arc::strong_count(v) > 1);
+            }
+            Arc::clone(
+                locks
+                    .entry(cid.to_owned())
+                    .or_insert_with(|| Arc::new(Mutex::new(()))),
+            )
+        };
+        let _build_guard = build_lock.lock().unwrap_or_else(|e| e.into_inner());
+        {
+            let mut cache = self.turns_cache.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(cached) = cache.get_mut(cid).filter(|c| c.sig == sig) {
+                cached.last_used = self.cache_tick.fetch_add(1, Ordering::Relaxed) + 1;
+                return (Arc::clone(&cached.items), cached.turns);
+            }
+        }
+        let types = self.db_types(cid);
+        let mut turns = 0usize;
+        let mut entries = Vec::new();
+        let mut idx = 0usize;
+        visit_jsonl_values(&history_path, |e| {
+            if idx == 0 || kind(&e["type"]) == "user" {
+                turns += 1;
+            }
+            idx += 1;
+            let mut item = self.entry(&e, &types, false);
+            truncate_preview_item(&mut item);
+            entries.push(item);
+            true
+        });
+        let entries = Arc::new(entries);
+        let tick = self.cache_tick.fetch_add(1, Ordering::Relaxed) + 1;
+        let mut cache = self.turns_cache.lock().unwrap_or_else(|e| e.into_inner());
+        while cache.len() >= 4 {
+            if let Some(old_key) = cache
+                .iter()
+                .min_by_key(|(_, v)| v.last_used)
+                .map(|(k, _)| k.clone())
+            {
+                cache.remove(&old_key);
+            } else {
+                break;
+            }
+        }
+        cache.insert(
+            cid.to_owned(),
+            CachedTurns {
+                sig,
+                items: Arc::clone(&entries),
+                turns,
+                last_used: tick,
+            },
+        );
         (entries, turns)
     }
-    fn page(&self, flat: &[Value], d: &Value) -> (Vec<Value>, usize, usize, usize) {
+    fn page(&self, flat: &[Value], d: &Value) -> (Vec<Value>, usize, usize, usize, bool) {
         let tools = d["include_tools"].as_bool().unwrap_or(false);
+        let around = d["around_key"].as_str().filter(|s| !s.is_empty());
         let flat: Vec<&Value> = flat
             .iter()
             .filter(|it| {
                 tools
+                    || around.is_some_and(|k| txt(it, "key") == k)
                     || (matches!(txt(it, "kind"), "user" | "assistant")
                         && !txt(it, "text").trim().is_empty())
             })
             .collect();
         let total = flat.len();
+        let limit = d["limit"].as_u64().unwrap_or(80).clamp(1, 150) as usize;
+        if let Some(target_key) = around {
+            if let Some(idx) = flat.iter().position(|it| txt(it, "key") == target_key) {
+                let after_limit = (limit / 2).max(15);
+                let half_items = if tools { 120 } else { limit };
+                let mut end = idx + 1;
+                let mut after_msgs =
+                    usize::from(matches!(txt(flat[idx], "kind"), "user" | "assistant"));
+                while end < total && after_msgs < after_limit && end - idx < half_items {
+                    if matches!(txt(flat[end], "kind"), "user" | "assistant") {
+                        after_msgs += 1;
+                    }
+                    end += 1;
+                }
+                let before_limit = limit.saturating_sub(after_msgs).max(15);
+                let mut start = idx;
+                let mut before_msgs = 0;
+                while start > 0 && before_msgs < before_limit && idx - start < half_items {
+                    start -= 1;
+                    if matches!(txt(flat[start], "kind"), "user" | "assistant") {
+                        before_msgs += 1;
+                    }
+                }
+                return (
+                    flat[start..end].iter().map(|v| (*v).clone()).collect(),
+                    before_msgs + after_msgs,
+                    total,
+                    start,
+                    end < total,
+                );
+            }
+        }
         let end = if d["before"].is_null() {
             total
         } else {
             num(&d["before"]).max(0) as usize
         }
         .min(total);
-        let limit = d["limit"].as_u64().unwrap_or(80).clamp(1, 150) as usize;
         let max_items = if tools { 350 } else { limit * 2 };
         let mut start = end;
         let mut msgs = 0;
         while start > 0 && msgs < limit && end - start < max_items {
             start -= 1;
-            if matches!(txt(&flat[start], "kind"), "user" | "assistant") {
+            if matches!(txt(flat[start], "kind"), "user" | "assistant") {
                 msgs += 1;
             }
         }
@@ -1180,13 +1461,14 @@ impl AntigravityProvider {
             msgs,
             total,
             start,
+            end < total,
         )
     }
     fn entries(&self, cid: &str, d: &Value) -> Result<Value> {
         let (flat, turns) = self.flat_entries(cid);
-        let (window, msgs, total, start) = self.page(&flat, d);
+        let (window, msgs, total, start, has_newer) = self.page(&flat, d);
         let status = self.lock_status(Some(cid))?;
-        Ok(json!({
+        let mut resp = json!({
             "provider": self.paths.id,
             "cid": cid,
             "turns": if window.is_empty() { json!([]) } else { json!([{ "items": window }]) },
@@ -1202,7 +1484,11 @@ impl AntigravityProvider {
             "auto_restart_hub": status["auto_restart_hub"],
             "can_unlock_db": status["can_unlock_db"],
             "can_restart_hub": status["can_restart_hub"],
-        }))
+        });
+        if has_newer {
+            resp["has_newer"] = json!(true);
+        }
+        Ok(resp)
     }
     fn step(&self, cid: &str, idx: i64) -> Result<(i64, Vec<u8>)> {
         let con = ro(&self.db(cid))?;
@@ -1227,9 +1513,7 @@ impl AntigravityProvider {
         let (stype, payload) = self.step(cid, idx)?;
         if stype == 14 {
             let text = self
-                .read_history(cid)
-                .into_iter()
-                .find(|e| num(&e["step_index"]) == idx)
+                .find_history_step(cid, idx)
                 .map(|e| txt(&e, "content").to_owned())
                 .unwrap_or_default();
             let hint = "Показан полный текст сообщения включая блоки <ADDITIONAL_METADATA> и <USER_SETTINGS_CHANGE>. Блок <USER_REQUEST> должен остаться. В базу пишется текст запроса, метаданные в транскрипты.";
@@ -1238,11 +1522,7 @@ impl AntigravityProvider {
             );
         }
         if stype == 15 {
-            let entry = self
-                .read_history(cid)
-                .into_iter()
-                .find(|e| num(&e["step_index"]) == idx)
-                .unwrap_or(Value::Null);
+            let entry = self.find_history_step(cid, idx).unwrap_or(Value::Null);
             let content = txt(&entry, "content").to_owned();
             if !content.trim().is_empty() {
                 return Ok(
@@ -1307,11 +1587,11 @@ impl AntigravityProvider {
         fs::create_dir_all(&chunks)?;
         for p in file_list(&chunks) {
             if p.extension().and_then(|x| x.to_str()) == Some("jsonl") {
-                fs::remove_file(p)?;
+                remove_file_retry(&p)?;
             }
         }
         for (i, b) in data.as_bytes().chunks(102400).enumerate() {
-            atomic(&chunks.join(format!("{i:08}.jsonl")), b)?;
+            fs::write(chunks.join(format!("{i:08}.jsonl")), b)?;
         }
         Ok(())
     }
@@ -1337,6 +1617,20 @@ impl AntigravityProvider {
                 self.annotation(cid),
                 dir.join("annotations").join(format!("{cid}.pbtxt")),
             )?;
+        }
+        let chapter = self.chapter_title_path(cid);
+        if chapter.is_file() {
+            fs::create_dir_all(dir.join("chapter_titles"))?;
+            fs::copy(
+                &chapter,
+                dir.join("chapter_titles").join(format!("{cid}.pb")),
+            )?;
+        }
+        let proto = self.summaries_proto_path();
+        if proto.is_file() {
+            if let Some(fname) = proto.file_name() {
+                fs::copy(&proto, dir.join(fname))?;
+            }
         }
         atomic(
             &dir.join("backup.meta.json"),
@@ -1384,6 +1678,21 @@ impl AntigravityProvider {
         if ann.is_file() && !self.annotation(cid).exists() {
             fs::create_dir_all(self.paths.root.join("annotations"))?;
             fs::copy(ann, self.annotation(cid))?;
+        }
+        let chapter = p.join("chapter_titles").join(format!("{cid}.pb"));
+        if chapter.is_file() {
+            let dst = self.chapter_title_path(cid);
+            if let Some(parent) = dst.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            atomic(&dst, &fs::read(&chapter)?)?;
+        }
+        let proto_dst = self.summaries_proto_path();
+        if let Some(fname) = proto_dst.file_name() {
+            let proto_src = p.join(fname);
+            if proto_src.is_file() {
+                atomic(&proto_dst, &fs::read(&proto_src)?)?;
+            }
         }
         self.invalidate(None);
         Ok(())
@@ -1434,11 +1743,7 @@ impl AntigravityProvider {
     }
     fn edit_text(&self, cid: &str, idx: i64, text: &str) -> Result<Value> {
         let (stype, payload) = self.step(cid, idx)?;
-        let old_entry = self
-            .read_history(cid)
-            .into_iter()
-            .find(|e| num(&e["step_index"]) == idx)
-            .unwrap_or(Value::Null);
+        let old_entry = self.find_history_step(cid, idx).unwrap_or(Value::Null);
         let old_content = txt(&old_entry, "content").to_owned();
         let planner_tool_edit = stype == 15
             && old_content.trim().is_empty()
@@ -1511,7 +1816,7 @@ impl AntigravityProvider {
             "UPDATE steps SET step_payload=? WHERE idx=?",
             params![new_payload, idx],
         )?;
-        let integrity: String = tx.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
+        let integrity: String = tx.query_row("PRAGMA quick_check", [], |r| r.get(0))?;
         ensure!(integrity == "ok", "integrity_check fail: {integrity}");
         tx.commit()?;
         wal_checkpoint_passive(&con);
@@ -1830,11 +2135,6 @@ impl AntigravityProvider {
         kept: &[Value],
         db_count: i64,
     ) -> Result<()> {
-        if !self.summaries().exists() {
-            return Ok(());
-        }
-        let mut con = rw(&self.summaries())?;
-        let tx = con.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let last_user = kept
             .iter()
             .filter(|e| txt(e, "type") == "USER_INPUT")
@@ -1842,75 +2142,85 @@ impl AntigravityProvider {
             .max()
             .unwrap_or(0)
             .max(0);
-        let rows = {
-            let mut s = tx.prepare(
-                "SELECT rowid,raw_summary FROM conversation_summaries WHERE conversation_id=?",
-            )?;
-            let v = s
-                .query_map([cid], |r| {
-                    Ok((
-                        r.get::<_, i64>(0)?,
-                        r.get::<_, Option<Vec<u8>>>(1)?.unwrap_or_default(),
-                    ))
-                })?
-                .collect::<std::result::Result<Vec<_>, _>>()?;
-            v
-        };
-        for (rowid, raw) in rows {
-            let mut changes = BTreeMap::from([(2, db_count.max(0) as u64)]);
-            if mode == "tail" {
-                changes.insert(16, last_user as u64);
-                tx.execute("UPDATE conversation_summaries SET step_count=?,last_user_input_step_index=? WHERE rowid=?",params![db_count,last_user,rowid])?;
-            } else {
-                tx.execute(
-                    "UPDATE conversation_summaries SET step_count=? WHERE rowid=?",
-                    params![db_count, rowid],
-                )?;
-            }
-            tx.execute(
-                "UPDATE conversation_summaries SET raw_summary=? WHERE rowid=?",
-                params![pbwire::patch_varints(&raw, &changes), rowid],
-            )?;
-        }
-        if table_exists(&tx, "conversations_fts") {
+        if self.summaries().exists() {
+            let mut con = rw(&self.summaries())?;
+            let tx = con.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             let rows = {
-                let mut s=tx.prepare("SELECT rowid,chunk_first_step,chunk_last_step,user_step_byte_offsets,agent_step_byte_offsets,user_body,agent_body FROM conversations_fts WHERE conversation_id=?")?;
+                let mut s = tx.prepare(
+                    "SELECT rowid,raw_summary FROM conversation_summaries WHERE conversation_id=?",
+                )?;
                 let v = s
                     .query_map([cid], |r| {
                         Ok((
                             r.get::<_, i64>(0)?,
-                            r.get::<_, SqlValue>(1)?,
-                            r.get::<_, SqlValue>(2)?,
-                            r.get::<_, SqlValue>(3)?,
-                            r.get::<_, SqlValue>(4)?,
-                            r.get::<_, SqlValue>(5)?,
-                            r.get::<_, SqlValue>(6)?,
+                            r.get::<_, Option<Vec<u8>>>(1)?.unwrap_or_default(),
                         ))
                     })?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
                 v
             };
-            for (rowid, first, last, uoff, aoff, ubody, abody) in rows {
-                let first = sql_num(&first);
-                let last = sql_num(&last);
-                if (mode == "tail" && first > keep) || (mode == "head" && last < keep) {
-                    tx.execute("DELETE FROM conversations_fts WHERE rowid=?", [rowid])?;
-                    continue;
-                }
-                if (mode == "tail" && last <= keep) || (mode == "head" && first >= keep) {
-                    continue;
-                }
-                let (uoff, ubody) = cut_fts_body(&uoff, &ubody, keep, mode)?;
-                let (aoff, abody) = cut_fts_body(&aoff, &abody, keep, mode)?;
+            for (rowid, raw) in rows {
+                let mut changes = BTreeMap::from([(2, db_count.max(0) as u64)]);
                 if mode == "tail" {
-                    tx.execute("UPDATE conversations_fts SET chunk_last_step=?,user_step_byte_offsets=?,agent_step_byte_offsets=?,user_body=?,agent_body=? WHERE rowid=?",params![keep,uoff,aoff,ubody,abody,rowid])?;
+                    changes.insert(16, last_user as u64);
+                    tx.execute("UPDATE conversation_summaries SET step_count=?,last_user_input_step_index=? WHERE rowid=?",params![db_count,last_user,rowid])?;
                 } else {
-                    tx.execute("UPDATE conversations_fts SET chunk_first_step=?,user_step_byte_offsets=?,agent_step_byte_offsets=?,user_body=?,agent_body=? WHERE rowid=?",params![first.max(keep),uoff,aoff,ubody,abody,rowid])?;
+                    tx.execute(
+                        "UPDATE conversation_summaries SET step_count=? WHERE rowid=?",
+                        params![db_count, rowid],
+                    )?;
+                }
+                tx.execute(
+                    "UPDATE conversation_summaries SET raw_summary=? WHERE rowid=?",
+                    params![pbwire::patch_varints(&raw, &changes), rowid],
+                )?;
+            }
+            if table_exists(&tx, "conversations_fts") {
+                let rows = {
+                    let mut s=tx.prepare("SELECT rowid,chunk_first_step,chunk_last_step,user_step_byte_offsets,agent_step_byte_offsets,user_body,agent_body FROM conversations_fts WHERE conversation_id=?")?;
+                    let v = s
+                        .query_map([cid], |r| {
+                            Ok((
+                                r.get::<_, i64>(0)?,
+                                r.get::<_, SqlValue>(1)?,
+                                r.get::<_, SqlValue>(2)?,
+                                r.get::<_, SqlValue>(3)?,
+                                r.get::<_, SqlValue>(4)?,
+                                r.get::<_, SqlValue>(5)?,
+                                r.get::<_, SqlValue>(6)?,
+                            ))
+                        })?
+                        .collect::<std::result::Result<Vec<_>, _>>()?;
+                    v
+                };
+                for (rowid, first, last, uoff, aoff, ubody, abody) in rows {
+                    let first = sql_num(&first);
+                    let last = sql_num(&last);
+                    if (mode == "tail" && first > keep) || (mode == "head" && last < keep) {
+                        tx.execute("DELETE FROM conversations_fts WHERE rowid=?", [rowid])?;
+                        continue;
+                    }
+                    if (mode == "tail" && last <= keep) || (mode == "head" && first >= keep) {
+                        continue;
+                    }
+                    let (uoff, ubody) = cut_fts_body(&uoff, &ubody, keep, mode)?;
+                    let (aoff, abody) = cut_fts_body(&aoff, &abody, keep, mode)?;
+                    if mode == "tail" {
+                        tx.execute("UPDATE conversations_fts SET chunk_last_step=?,user_step_byte_offsets=?,agent_step_byte_offsets=?,user_body=?,agent_body=? WHERE rowid=?",params![keep,uoff,aoff,ubody,abody,rowid])?;
+                    } else {
+                        tx.execute("UPDATE conversations_fts SET chunk_first_step=?,user_step_byte_offsets=?,agent_step_byte_offsets=?,user_body=?,agent_body=? WHERE rowid=?",params![first.max(keep),uoff,aoff,ubody,abody,rowid])?;
+                    }
                 }
             }
+            tx.commit()?;
+            wal_checkpoint_passive(&con);
         }
-        tx.commit()?;
-        wal_checkpoint_passive(&con);
+        update_summaries_proto_counts(
+            &self.summaries_proto_path(),
+            cid,
+            db_count.max(0) as u64,
+            last_user as u64,
+        )?;
         Ok(())
     }
     fn remove_counts(&self, cid: &str, keep: i64, mode: &str) -> (usize, usize, usize) {
@@ -1945,17 +2255,28 @@ impl AntigravityProvider {
             matches!(mode, "head" | "tail"),
             "Недопустимый режим обрезки."
         );
-        let entries = self.read_history(cid);
-        let removed: Vec<_> = entries
-            .iter()
-            .filter(|e| is_removed(num(&e["step_index"]), keep, mode))
-            .cloned()
-            .collect();
-        let kept: Vec<_> = entries
-            .iter()
-            .filter(|e| !is_removed(num(&e["step_index"]), keep, mode))
-            .cloned()
-            .collect();
+        let (total_lines, removed_count, kept) = if preview {
+            let mut total_lines = 0usize;
+            let mut removed_count = 0usize;
+            visit_jsonl_values(&self.history_path(cid), |e| {
+                total_lines += 1;
+                if is_removed(num(&e["step_index"]), keep, mode) {
+                    removed_count += 1;
+                }
+                true
+            });
+            (total_lines, removed_count, Vec::new())
+        } else {
+            let entries = self.read_history(cid);
+            let total_lines = entries.len();
+            let kept: Vec<_> = entries
+                .into_iter()
+                .filter(|e| !is_removed(num(&e["step_index"]), keep, mode))
+                .collect();
+            let removed_count = total_lines.saturating_sub(kept.len());
+            (total_lines, removed_count, kept)
+        };
+        let kept_count = total_lines.saturating_sub(removed_count);
         let con = ro(&self.db(cid))?;
         let total: i64 = con.query_row("SELECT count(*) FROM steps", [], |r| r.get(0))?;
         let compare = if mode == "tail" { ">" } else { "<" };
@@ -1965,10 +2286,10 @@ impl AntigravityProvider {
             |r| r.get(0),
         )?;
         drop(con);
-        let mut rep = json!({"cid":cid,"keep_step":keep,"mode":mode,"preview_only":preview,"transcript_lines_before":entries.len(),"transcript_lines_removed":removed.len(),"transcript_lines_kept":kept.len(),"db_rows_before":total});
+        let mut rep = json!({"cid":cid,"keep_step":keep,"mode":mode,"preview_only":preview,"transcript_lines_before":total_lines,"transcript_lines_removed":removed_count,"transcript_lines_kept":kept_count,"db_rows_before":total});
         if preview {
             let (m, s, t) = self.remove_counts(cid, keep, mode);
-            rep["will_delete"] = json!({"db_rows":to_delete,"transcript_lines":removed.len(),"messages_files":m,"steps_output_dirs":s,"task_logs":t});
+            rep["will_delete"] = json!({"db_rows":to_delete,"transcript_lines":removed_count,"messages_files":m,"steps_output_dirs":s,"task_logs":t});
             return Ok(rep);
         }
         let mut con = rw(&self.db(cid))?;
@@ -1999,7 +2320,7 @@ impl AntigravityProvider {
                 }
             }
         }
-        let integrity: String = tx.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
+        let integrity: String = tx.query_row("PRAGMA quick_check", [], |r| r.get(0))?;
         ensure!(integrity == "ok", "integrity_check fail: {integrity}");
         let (count, max_idx): (i64, Option<i64>) =
             tx.query_row("SELECT count(*),max(idx) FROM steps", [], |r| {
@@ -2044,7 +2365,7 @@ impl AntigravityProvider {
                 continue;
             };
             if msg_step(&msg).is_some_and(|i| is_removed(i, keep, mode)) {
-                fs::remove_file(path)?;
+                remove_file_retry(&path)?;
                 removed_msgs.push(msg);
             } else {
                 kept_msgs.push(msg);
@@ -2078,14 +2399,14 @@ impl AntigravityProvider {
                 continue;
             };
             if is_removed(idx, keep, mode) && !protected.contains(&idx) {
-                fs::remove_dir_all(path)?;
+                remove_dir_all_retry(&path)?;
                 outs += 1;
             }
         }
         for path in file_list(&self.brain(cid).join("tasks")) {
             if let Some(idx) = task_idx(&path) {
                 if is_removed(idx, keep, mode) && !protected.contains(&idx) {
-                    fs::remove_file(path)?;
+                    remove_file_retry(&path)?;
                     tasks += 1;
                 }
             }
@@ -2175,6 +2496,9 @@ impl AntigravityProvider {
             .to_lowercase();
         let mut samples = BTreeSet::new();
         for e in removed {
+            if samples.len() >= 15 {
+                break;
+            }
             let text = txt(e, "content");
             if text.chars().count() > 120 {
                 let frag = text
@@ -2202,17 +2526,36 @@ impl AntigravityProvider {
         );
         let mut leaks = Vec::new();
         for path in targets {
-            if let Ok(bytes) = fs::read(&path) {
+            let Ok(file) = File::open(&path) else {
+                continue;
+            };
+            let mut reader = BufReader::with_capacity(256 * 1024, file);
+            let mut found = BTreeSet::new();
+            let mut buf = Vec::new();
+            loop {
+                buf.clear();
+                let Ok(n) = reader.read_until(b'\n', &mut buf) else {
+                    break;
+                };
+                if n == 0 {
+                    break;
+                }
+                let line = String::from_utf8_lossy(&buf);
                 for s in &samples {
-                    if bytes.windows(s.len()).any(|w| w == s.as_bytes()) {
-                        leaks.push(json!([path, s]));
+                    if !found.contains(s.as_str()) && line.contains(s.as_str()) {
+                        found.insert(s.clone());
+                        leaks.push(json!([&path, s]));
                     }
+                }
+                if found.len() == samples.len() {
+                    break;
                 }
             }
         }
         if let Ok(con) = ro(&self.summaries()) {
             if table_exists(&con, "conversations_fts") {
-                let token_re = Regex::new(r"[A-Za-zА-Яа-я0-9]+").unwrap();
+                static TOKEN_RE: OnceLock<Regex> = OnceLock::new();
+                let token_re = TOKEN_RE.get_or_init(|| Regex::new(r"[A-Za-zА-Яа-я0-9]+").unwrap());
                 for sample in samples {
                     let words: Vec<_> = token_re
                         .find_iter(&sample)
@@ -2240,9 +2583,11 @@ impl AntigravityProvider {
             None
         };
         let (mut hub_restarted, mut hub_pids) = (false, Vec::new());
-        if cfg!(windows) && ctx.auto_restart_hub {
-            guard.take();
-            (hub_restarted, hub_pids) = self.maybe_auto_restart_hub(Some(cid), ctx, &mut warns);
+        guard.take();
+        if ctx.auto_restart_hub || (cfg!(windows) && self.is_effective_live_unlocked(cid)) {
+            let (pre_restarted, pre_pids) = self.maybe_auto_restart_hub(Some(cid), ctx, &mut warns);
+            hub_restarted = pre_restarted;
+            hub_pids = pre_pids;
         }
         ctx.phase("cut");
         let result = (|| -> Result<()> {
@@ -2253,6 +2598,7 @@ impl AntigravityProvider {
             let brain = self.paths.root.join("brain").join(cid);
             remove_dir_all_retry(&brain)?;
             remove_file_retry(&self.annotation(cid))?;
+            remove_file_retry(&self.chapter_title_path(cid))?;
             if self.summaries().is_file() {
                 let mut con = rw(&self.summaries())?;
                 let tx = con.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -2273,11 +2619,11 @@ impl AntigravityProvider {
                     )?;
                 }
                 tx.commit()?;
-                wal_checkpoint_passive(&con);
             }
+            remove_from_summaries_proto(&self.summaries_proto_path(), cid)?;
+            wal_checkpoint_truncate(&self.summaries());
             Ok(())
         })();
-        guard.take();
         if let Err(error) = result {
             if let Some(b) = &backup {
                 self.restore(b).with_context(|| {
@@ -2300,14 +2646,19 @@ impl AntigravityProvider {
         }
         let presence = self.paths.root.join("presence").join(format!("{cid}.lock"));
         if presence.exists() {
-            let _ = fs::remove_file(presence);
+            let _ = remove_file_retry(&presence);
         }
         self.live_unlocked
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .remove(cid);
-        if !hub_restarted {
-            (hub_restarted, hub_pids) = self.maybe_auto_restart_hub(Some(cid), ctx, &mut warns);
+        self.invalidate(Some(cid));
+        let (post_restarted, post_pids) = self.maybe_auto_restart_hub(Some(cid), ctx, &mut warns);
+        hub_restarted = hub_restarted || post_restarted;
+        for pid in post_pids {
+            if !hub_pids.contains(&pid) {
+                hub_pids.push(pid);
+            }
         }
         self.invalidate(Some(cid));
         ctx.phase("done");
@@ -2375,8 +2726,10 @@ fn task_idx(p: &Path) -> Option<i64> {
         .ok()
 }
 fn protected_refs(kept: &[Value], messages: &[Value]) -> BTreeSet<i64> {
-    let step = Regex::new(r"steps/(\d+)/output\.txt").unwrap();
-    let task = Regex::new(r"task-(\d+)\.log").unwrap();
+    static STEP_RE: OnceLock<Regex> = OnceLock::new();
+    static TASK_RE: OnceLock<Regex> = OnceLock::new();
+    let step = STEP_RE.get_or_init(|| Regex::new(r"steps/(\d+)/output\.txt").unwrap());
+    let task = TASK_RE.get_or_init(|| Regex::new(r"task-(\d+)\.log").unwrap());
     let mut out = BTreeSet::new();
     for e in kept.iter().chain(messages) {
         let text = format!(
@@ -2386,7 +2739,7 @@ fn protected_refs(kept: &[Value], messages: &[Value]) -> BTreeSet<i64> {
                 .map(Value::to_string)
                 .unwrap_or_default()
         );
-        for re in [&step, &task] {
+        for re in [step, task] {
             for c in re.captures_iter(&text) {
                 if let Ok(n) = c[1].parse() {
                     out.insert(n);
@@ -2538,10 +2891,13 @@ impl AntigravityProvider {
         safe_id(cid)?;
         let mut flat = Vec::new();
         if let Some(path) = Self::backup_transcript(&p, cid) {
-            flat = read_values(&path)
-                .iter()
-                .map(|e| self.entry(e, &BTreeMap::new(), true))
-                .collect();
+            let empty_types = BTreeMap::new();
+            visit_jsonl_values(&path, |e| {
+                let mut item = self.entry(&e, &empty_types, true);
+                truncate_preview_item(&mut item);
+                flat.push(item);
+                true
+            });
         } else if p.join(format!("{cid}.db")).is_file() {
             let con = ro(&p.join(format!("{cid}.db")))?;
             let mut stmt =
@@ -2557,13 +2913,17 @@ impl AntigravityProvider {
                 let k = kind_num(stype);
                 let summary = payload_summary(stype, &payload);
                 let tool = txt(&summary, "tool");
-                flat.push(json!({"key":idx.to_string(),"step_index":idx,"kind":k,"subtype":k,"label":self.label(k),"text":if txt(&summary,"text").is_empty(){txt(&summary,"args")}else{txt(&summary,"text")},"ts":"","tool":if tool.is_empty(){Value::Null}else{json!(tool)},"status":null,"in_db":true,"actions":[]}));
+                let mut item = json!({"key":idx.to_string(),"step_index":idx,"kind":k,"subtype":k,"label":self.label(k),"text":if txt(&summary,"text").is_empty(){txt(&summary,"args")}else{txt(&summary,"text")},"ts":"","tool":if tool.is_empty(){Value::Null}else{json!(tool)},"status":null,"in_db":true,"actions":[]});
+                truncate_preview_item(&mut item);
+                flat.push(item);
             }
         }
-        let (window, msgs, total, start) = self.page(&flat, d);
-        Ok(
-            json!({"provider":self.paths.id,"cid":cid,"backup_dir":p,"backup_name":p.file_name().and_then(|n|n.to_str()),"title":self.backup_title(&p,cid,&self.titles()),"readonly":true,"turns":if window.is_empty(){json!([])}else{json!([{ "items":window }])},"page_msgs":msgs,"total_label":format!("записей: {total}"),"cursor":if start>0{json!(start.to_string())}else{Value::Null},"has_more":start>0,"writable":false}),
-        )
+        let (window, msgs, total, start, has_newer) = self.page(&flat, d);
+        let mut resp = json!({"provider":self.paths.id,"cid":cid,"backup_dir":p,"backup_name":p.file_name().and_then(|n|n.to_str()),"title":self.backup_title(&p,cid,&self.titles()),"readonly":true,"turns":if window.is_empty(){json!([])}else{json!([{ "items":window }])},"page_msgs":msgs,"total_label":format!("записей: {total}"),"cursor":if start>0{json!(start.to_string())}else{Value::Null},"has_more":start>0,"writable":false});
+        if has_newer {
+            resp["has_newer"] = json!(true);
+        }
+        Ok(resp)
     }
     fn db_history_fallback(&self, cid: &str) -> Vec<Value> {
         let Ok(con) = ro(&self.db(cid)) else {
@@ -2663,22 +3023,44 @@ impl AntigravityProvider {
                 entries.push(json!({"kind":"tool","subtype":"thinking","label":"thinking","text":thinking,"ts":txt(&e,"created_at"),"tool":"thinking","status":"ok","code":""}));
             }
             let tools = tool_names(&e);
-            if text.trim().is_empty() && !tools.is_empty() {
-                text = e["tool_calls"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .map(|call| {
-                        let args = call
-                            .get("args")
-                            .filter(|v| !v.is_null())
-                            .or_else(|| call.get("arguments"))
-                            .cloned()
-                            .unwrap_or(json!({}));
-                        format!("{}({})", txt(call, "name"), python_json(&args))
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n");
+            if k == "assistant" && !tools.is_empty() {
+                if !text.trim().is_empty() {
+                    entries.push(json!({"kind":"assistant","subtype":"planner_response","label":"assistant","text":text,"ts":txt(&e,"created_at"),"tool":Value::Null,"status":e["status"],"code":""}));
+                }
+                if include_tools {
+                    if let Some(calls) = e["tool_calls"].as_array() {
+                        for call in calls {
+                            let cname = txt(call, "name");
+                            if cname.is_empty() {
+                                continue;
+                            }
+                            let args = call
+                                .get("args")
+                                .filter(|v| !v.is_null())
+                                .or_else(|| call.get("arguments").filter(|v| !v.is_null()))
+                                .cloned()
+                                .unwrap_or_else(|| json!({}));
+                            let args_text = if let Some(s) = args.as_str() {
+                                s.to_owned()
+                            } else {
+                                serde_json::to_string(&args).unwrap_or_else(|_| "{}".into())
+                            };
+                            entries.push(json!({"kind":"tool","subtype":"tool_use","label":cname,"text":args_text,"ts":txt(&e,"created_at"),"tool":cname,"status":e["status"],"code":""}));
+                        }
+                    }
+                }
+                continue;
+            }
+            if k == "tool" && tools.is_empty() {
+                if !text.trim().is_empty() {
+                    let st = if e["error"].is_null() {
+                        e["status"].clone()
+                    } else {
+                        json!("error")
+                    };
+                    entries.push(json!({"kind":"tool","subtype":"tool_result","label":"tool_result","text":text,"ts":txt(&e,"created_at"),"tool":"tool_result","status":st,"code":""}));
+                }
+                continue;
             }
             if text.trim().is_empty() && tools.is_empty() {
                 continue;
@@ -2728,6 +3110,151 @@ impl Provider for AntigravityProvider {
     fn paths(&self) -> &ProviderPaths {
         &self.paths
     }
+    fn visit_entries(&self, cid: &str, f: &mut dyn FnMut(EntryRef<'_>) -> bool) -> Result<()> {
+        safe_id(cid)?;
+        let history_path = self.history_path(cid);
+        let mut visited_any = false;
+        let mut stopped = false;
+        if history_path.is_file() {
+            visit_jsonl_values(&history_path, |e| {
+                visited_any = true;
+                let (idx, _, k, subtype, label, text, _) = self.entry_fields(&e);
+                let key_s = idx.to_string();
+                let entry = EntryRef {
+                    key: &key_s,
+                    kind: k,
+                    subtype: &subtype,
+                    label: &label,
+                    ts: txt(&e, "created_at"),
+                    text: &text,
+                };
+                if !f(entry) {
+                    stopped = true;
+                    return false;
+                }
+                true
+            });
+        }
+        if !visited_any && !stopped && self.db(cid).is_file() {
+            if let Ok(con) = ro(&self.db(cid)) {
+                if let Ok(mut stmt) = con
+                    .prepare("SELECT idx,step_type,metadata,step_payload FROM steps ORDER BY idx")
+                {
+                    if let Ok(mut rows) = stmt.query([]) {
+                        while let Ok(Some(r)) = rows.next() {
+                            let Ok(idx) = r.get::<_, i64>(0) else {
+                                continue;
+                            };
+                            let Ok(stype) = r.get::<_, i64>(1) else {
+                                continue;
+                            };
+                            let metadata = r
+                                .get::<_, Option<Vec<u8>>>(2)
+                                .ok()
+                                .flatten()
+                                .unwrap_or_default();
+                            let payload = r
+                                .get::<_, Option<Vec<u8>>>(3)
+                                .ok()
+                                .flatten()
+                                .unwrap_or_default();
+                            let seconds = bytes_at(&metadata, &[1])
+                                .and_then(|b| {
+                                    parse_fields(&b)
+                                        .iter()
+                                        .find(|f| f.number == 1 && f.wire_type == 0)
+                                        .and_then(|f| f.varint())
+                                })
+                                .unwrap_or(0);
+                            let iso = if seconds > 946_684_800 {
+                                DateTime::from_timestamp(seconds as i64, 0)
+                                    .map(|d| d.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true))
+                                    .unwrap_or_default()
+                            } else {
+                                String::new()
+                            };
+                            let synth = if stype == 14 {
+                                string_at(&payload, &[19, 2])
+                                    .filter(|s| !s.trim().is_empty())
+                                    .map(|text| {
+                                        json!({"step_index":idx,"type":"USER_INPUT","content":text,"created_at":iso,"status":"DONE"})
+                                    })
+                            } else if stype == 15 {
+                                let text = string_at(&payload, &[20, 8])
+                                    .filter(|s| !s.is_empty())
+                                    .or_else(|| string_at(&payload, &[20, 1]))
+                                    .unwrap_or_default();
+                                let think = string_at(&payload, &[20, 3]).unwrap_or_default();
+                                (!text.trim().is_empty() || !think.trim().is_empty()).then(|| {
+                                    json!({"step_index":idx,"type":"PLANNER_RESPONSE","content":text,"thinking":think,"created_at":iso,"status":"DONE"})
+                                })
+                            } else {
+                                let text = service_text(stype, &payload)
+                                    .map(|(_, s)| s)
+                                    .unwrap_or_else(|| {
+                                        let summary = payload_summary(stype, &payload);
+                                        if txt(&summary, "text").is_empty() {
+                                            txt(&summary, "args").to_owned()
+                                        } else {
+                                            txt(&summary, "text").to_owned()
+                                        }
+                                    });
+                                (!text.trim().is_empty()).then(|| {
+                                    json!({"step_index":idx,"type":step_name(stype),"content":text,"created_at":iso,"status":"DONE"})
+                                })
+                            };
+                            if let Some(v) = synth {
+                                let (eidx, _, k, subtype, label, text, _) = self.entry_fields(&v);
+                                let key_s = eidx.to_string();
+                                let entry = EntryRef {
+                                    key: &key_s,
+                                    kind: k,
+                                    subtype: &subtype,
+                                    label: &label,
+                                    ts: txt(&v, "created_at"),
+                                    text: &text,
+                                };
+                                if !f(entry) {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+    fn read_entry_text(&self, cid: &str, key: &str) -> Result<Option<String>> {
+        safe_id(cid)?;
+        let Ok(idx) = key.parse::<i64>() else {
+            return Ok(None);
+        };
+        if let Some(e) = self.find_history_step(cid, idx) {
+            let (_, _, _, _, _, text, _) = self.entry_fields(&e);
+            return Ok(Some(text));
+        }
+        if let Ok((stype, payload)) = self.step(cid, idx) {
+            let text = match stype {
+                14 => string_at(&payload, &[19, 2]),
+                15 => string_at(&payload, &[20, 8])
+                    .filter(|s| !s.is_empty())
+                    .or_else(|| string_at(&payload, &[20, 1]))
+                    .or_else(|| string_at(&payload, &[20, 3])),
+                _ => service_text(stype, &payload).map(|(_, s)| s).or_else(|| {
+                    let summary = payload_summary(stype, &payload);
+                    let t = if txt(&summary, "text").is_empty() {
+                        txt(&summary, "args")
+                    } else {
+                        txt(&summary, "text")
+                    };
+                    (!t.is_empty()).then(|| t.to_owned())
+                }),
+            };
+            return Ok(text);
+        }
+        Ok(None)
+    }
     fn probe_lock(&self, cid: Option<&str>) -> Result<Option<String>> {
         if let Some(cid) = cid {
             safe_id(cid)?;
@@ -2755,9 +3282,37 @@ impl Provider for AntigravityProvider {
         Ok(None)
     }
     fn lock_status(&self, cid: Option<&str>) -> Result<Value> {
-        let reason = self.probe_lock(cid)?;
         let live_unlocked = cid.is_some_and(|c| self.is_effective_live_unlocked(c));
-        let presence_locked = cid.is_some_and(|c| self.is_presence_locked(c));
+        let mut presence_locked = false;
+        let mut reason: Option<String> = None;
+        if let Some(cid) = cid {
+            safe_id(cid)?;
+            if let Err(error) = self.presence_guard(cid) {
+                presence_locked = true;
+                if !live_unlocked {
+                    reason = Some(format!(
+                        "Файл диалога {} занят ({error}). Закройте {} и повторите.",
+                        self.paths.name, self.paths.name
+                    ));
+                }
+            }
+            if reason.is_none() {
+                if let Err(error) = db_probe(&self.db(cid)) {
+                    reason = Some(format!(
+                        "Файл диалога {} занят ({error}). Закройте {} и повторите.",
+                        self.paths.name, self.paths.name
+                    ));
+                }
+            }
+        }
+        if reason.is_none() {
+            if let Err(error) = db_probe(&self.summaries()) {
+                reason = Some(format!(
+                    "База {} занята ({error}). Закройте {} и повторите.",
+                    self.paths.name, self.paths.name
+                ));
+            }
+        }
         Ok(json!({
             "locked": reason.is_some(),
             "reason": reason.unwrap_or_default(),
@@ -2770,6 +3325,31 @@ impl Provider for AntigravityProvider {
     }
     fn set_auto_restart_hub(&self, enabled: bool) {
         self.auto_restart_hub.store(enabled, Ordering::Relaxed);
+    }
+    fn content_signature(&self, cid: &str) -> Option<String> {
+        safe_id(cid).ok()?;
+        let db = self.db(cid);
+        let meta = fs::metadata(&db).ok()?;
+        let db_len = meta.len();
+        let db_mtime = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let wal = PathBuf::from(format!("{}-wal", db.display()));
+        let (wal_mtime, wal_len) = stat_signature(&wal);
+        Some(format!("{db_len}:{db_mtime}:{wal_len}:{wal_mtime}"))
+    }
+    fn after_external_import(&self, cid: &str, ctx: &OpContext) -> Result<()> {
+        safe_id(cid)?;
+        if ctx.auto_restart_hub {
+            let _ = self.maybe_auto_restart_hub(Some(cid), ctx, &mut Vec::new());
+            wal_checkpoint_truncate(&self.db(cid));
+            wal_checkpoint_truncate(&self.summaries());
+        }
+        self.invalidate(Some(cid));
+        Ok(())
     }
     fn call(&self, op: &str, d: &Value, ctx: &OpContext) -> Result<Value> {
         match op {
@@ -2880,26 +3460,6 @@ fn percent_decode(s: &str) -> String {
         i += 1;
     }
     String::from_utf8_lossy(&out).into_owned()
-}
-fn python_json(v: &Value) -> String {
-    match v {
-        Value::Array(a) => format!(
-            "[{}]",
-            a.iter().map(python_json).collect::<Vec<_>>().join(", ")
-        ),
-        Value::Object(o) => format!(
-            "{{{}}}",
-            o.iter()
-                .map(|(k, v)| format!(
-                    "{}: {}",
-                    serde_json::to_string(k).unwrap_or_default(),
-                    python_json(v)
-                ))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        _ => v.to_string(),
-    }
 }
 
 #[cfg(test)]

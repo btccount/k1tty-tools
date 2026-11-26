@@ -652,6 +652,7 @@ pub fn snapshot() -> ProcessMap {
 
 pub fn snapshot_force(force: bool) -> ProcessMap {
     static CACHE: OnceLock<Mutex<Option<(Instant, ProcessMap)>>> = OnceLock::new();
+    static SYSTEM: OnceLock<Mutex<System>> = OnceLock::new();
     let mut cache = CACHE
         .get_or_init(|| Mutex::new(None))
         .lock()
@@ -663,7 +664,10 @@ pub fn snapshot_force(force: bool) -> ProcessMap {
             }
         }
     }
-    let mut system = System::new();
+    let mut system = SYSTEM
+        .get_or_init(|| Mutex::new(System::new()))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     system.refresh_processes_specifics(
         ProcessesToUpdate::All,
         true,
@@ -700,6 +704,7 @@ pub fn snapshot_force(force: bool) -> ProcessMap {
             codex_bundle: is_codex_bundle,
         });
     }
+    drop(system);
     #[cfg(windows)]
     let visible = Some(win::visible_window_pids());
     #[cfg(not(windows))]

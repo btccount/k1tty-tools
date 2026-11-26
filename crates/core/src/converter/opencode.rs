@@ -192,12 +192,16 @@ pub(super) fn import(
         end: None,
         first,
     };
-    for (e, time) in entries.iter().zip(&times) {
-        let ms = (*time * 1000.0) as i64;
+    let mut i = 0usize;
+    while i < entries.len() {
+        let e = &entries[i];
+        let time = times[i];
+        let ms = (time * 1000.0) as i64;
         last = last.max(ms);
         let kind = nonempty(s(e, "kind")).unwrap_or_else(|| "assistant".into());
         let text = s(e, "text");
         if kind == "assistant" {
+            i += 1;
             if w.has_tool() {
                 w.flush()?;
             }
@@ -205,6 +209,7 @@ pub(super) fn import(
             continue;
         }
         if kind == "tool" && e["subtype"] == "thinking" {
+            i += 1;
             if !text.trim().is_empty() {
                 if w.has_tool() {
                     w.flush()?;
@@ -217,17 +222,109 @@ pub(super) fn import(
             continue;
         }
         if kind == "tool" {
-            let name = nonempty(s(e, "tool"))
-                .or_else(|| nonempty(s(e, "label")))
-                .unwrap_or_else(|| "tool".into());
-            let state = if s(e, "status").to_lowercase() == "error" {
-                json!({"status":"error","input":{},"error":{"type":"aborted","message":if text.is_empty(){"Tool error"}else{&text}}})
-            } else {
-                json!({"status":"completed","input":{},"content":[{"type":"text","text":text}],"metadata":{"status":"completed","truncated":false}})
+            let inv = tools::consume_tool_pair(&entries, &times, &mut i);
+            let call_ms = (inv.ts_call * 1000.0) as i64;
+            let res_ms = ((inv.ts_result * 1000.0) as i64).max(call_ms);
+            last = last.max(res_ms);
+            let (name, input, meta): (String, Value, Value) = match inv.canonical {
+                tools::CanonicalTool::Shell { command, .. } => (
+                    "shell".into(),
+                    json!({"command":command}),
+                    json!({"status":"completed","truncated":false,"exit":if inv.is_error{1}else{0}}),
+                ),
+                tools::CanonicalTool::Read {
+                    path,
+                    start_line,
+                    end_line,
+                } => {
+                    let mut inp = json!({"path":path});
+                    if let Some(s) = start_line {
+                        inp["offset"] = json!(s);
+                        if let Some(end) = end_line.filter(|end| *end >= s) {
+                            inp["limit"] = json!(end - s + 1);
+                        }
+                    }
+                    ("read".into(), inp, json!({"truncated":false}))
+                }
+                tools::CanonicalTool::Write { path, content } => (
+                    "write".into(),
+                    json!({"path":path,"content":content}),
+                    json!({"truncated":false}),
+                ),
+                tools::CanonicalTool::Edit {
+                    path,
+                    old_string,
+                    new_string,
+                    diff,
+                    content,
+                } => {
+                    if !old_string.is_empty() {
+                        let udiff = diff
+                            .unwrap_or_else(|| tools::build_unified_diff(&old_string, &new_string));
+                        let (adds, dels) = tools::count_diff_stats(&udiff);
+                        (
+                            "edit".into(),
+                            json!({"path":path,"oldString":old_string,"newString":new_string}),
+                            json!({"files":[{"file":path,"patch":udiff,"status":"modified","additions":adds,"deletions":dels}],"truncated":false}),
+                        )
+                    } else {
+                        let body = content.unwrap_or(new_string);
+                        (
+                            "write".into(),
+                            json!({"path":path,"content":body}),
+                            json!({"truncated":false}),
+                        )
+                    }
+                }
+                tools::CanonicalTool::Delete { path } => (
+                    "shell".into(),
+                    json!({"command":format!("rm -f {}", tools::shell_quote(&path))}),
+                    json!({"status":"completed","truncated":false,"exit":if inv.is_error{1}else{0}}),
+                ),
+                tools::CanonicalTool::ListDir { path, pattern } => (
+                    "glob".into(),
+                    json!({"pattern":pattern.unwrap_or_else(|| "*".into()),"path":path}),
+                    json!({"truncated":false}),
+                ),
+                tools::CanonicalTool::Grep { pattern, path } => {
+                    let mut inp = json!({"pattern":pattern});
+                    if let Some(p) = path.filter(|s| !s.is_empty()) {
+                        inp["path"] = json!(p);
+                    }
+                    let matches = inv
+                        .result_text
+                        .lines()
+                        .filter(|l| !l.trim().is_empty())
+                        .count();
+                    (
+                        "grep".into(),
+                        inp,
+                        json!({"matches":matches,"truncated":false}),
+                    )
+                }
+                tools::CanonicalTool::WebSearch { query } => (
+                    "websearch".into(),
+                    json!({"query":query}),
+                    json!({"truncated":false}),
+                ),
+                tools::CanonicalTool::Generic { name, args } => (
+                    name.to_ascii_lowercase(),
+                    if args.is_object() { args } else { json!({}) },
+                    json!({"status":"completed","truncated":false}),
+                ),
             };
-            w.part(json!({"type":"tool","id":format!("call-{}",uuid()),"name":name,"executed":false,"state":state,"time":{"created":ms,"ran":ms,"completed":ms}}),ms);
+            let state = if inv.is_error {
+                json!({"status":"error","input":input,"error":{"type":"aborted","message":if inv.result_text.is_empty(){"Tool error"}else{&inv.result_text}}})
+            } else {
+                json!({"status":"completed","input":input,"content":[{"type":"text","text":inv.result_text}],"metadata":meta})
+            };
+            w.part(
+                json!({"type":"tool","id":format!("chatcmpl-tool-{}", &uuid_hex()[..16]),"name":name,"executed":false,"state":state,"time":{"created":call_ms,"ran":call_ms,"completed":res_ms}}),
+                call_ms,
+            );
             continue;
         }
+        i += 1;
         w.flush()?;
         let mid = w.next_id(ms);
         let (typ, data) = match kind.as_str() {

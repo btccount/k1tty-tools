@@ -771,3 +771,152 @@ fn antigravity_live_unlock_rpc_flow_works_and_rejects_other_providers() {
         true
     );
 }
+
+#[test]
+fn deepseek_config_and_save_chat_work_across_all_providers() {
+    let h = Harness::new();
+    let cfg = h.rpc("deepseek_config", "all", json!({}));
+    assert!(!cfg["default_desktop_dir"].as_str().unwrap_or("").is_empty());
+    assert!(cfg["models"].as_array().is_some_and(|m| !m.is_empty()));
+
+    let saved = h.rpc(
+        "deepseek_save_config",
+        "all",
+        json!({
+            "api_key": "sk-contract12345678",
+            "model": "deepseek-v4-pro",
+            "effort": "high",
+            "use_folder": true,
+            "folder_path": h.root.path().to_string_lossy()
+        }),
+    );
+    assert_eq!(saved["has_key"], true);
+    assert_eq!(saved["key_masked"], "sk-c••••5678");
+    assert_eq!(saved["model"], "deepseek-v4-pro");
+    assert_eq!(saved["effort"], "high");
+
+    let doc = json!({
+        "meta": {
+            "source_provider": "deepseek",
+            "title": "DeepSeek Synthetic Dialogue",
+            "directory": h.root.path().to_string_lossy()
+        },
+        "entries": [
+            {"kind": "system", "subtype": "instructions", "text": "Synthetic safety-guard context."},
+            {"kind": "user", "subtype": "prompt", "text": "Обсудим структуру тестового мода."},
+            {"kind": "tool", "subtype": "thinking", "tool": "thinking", "text": "Проверю список файлов в тестовой папке."},
+            {"kind": "tool", "subtype": "tool_use", "tool": "list_dir", "text": "{\"path\":\"./src\"}"},
+            {"kind": "tool", "subtype": "tool_result", "tool": "list_dir", "status": "ok", "text": "main.lua config.json"},
+            {"kind": "assistant", "subtype": "reply", "text": "Готово, разобрал структуру и предложил схему."}
+        ]
+    });
+
+    for target in [
+        "antigravity",
+        "antigravity_cli",
+        "codex",
+        "claude",
+        "opencode",
+    ] {
+        let res = h.rpc(
+            "deepseek_save_chat",
+            target,
+            json!({
+                "target": target,
+                "title": format!("Gen {target}"),
+                "include_tools": true,
+                "doc": doc
+            }),
+        );
+        assert_eq!(res["ok"], true, "target={target}");
+        let cid = res["result"]["cid"].as_str().unwrap();
+        let entries = h.rpc(
+            "entries",
+            target,
+            json!({"cid": cid, "include_tools": true}),
+        );
+        let all_items = items(&entries);
+        assert!(
+            all_items.iter().any(|it| it["text"]
+                .as_str()
+                .unwrap_or("")
+                .contains("структуру тестового мода")),
+            "missing user text in {target}"
+        );
+        assert!(
+            all_items.iter().any(|it| it["text"]
+                .as_str()
+                .unwrap_or("")
+                .contains("разобрал структуру")),
+            "missing assistant text in {target}"
+        );
+    }
+}
+
+#[test]
+fn set_settings_auto_restart_hub_emits_procs_event() {
+    let h = Harness::new();
+    let res = h.rpc("set_settings", "all", json!({"auto_restart_hub": true}));
+    assert_eq!(res["settings"]["auto_restart_hub"], true);
+    let mut saw_settings = false;
+    let mut procs_event = None;
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline && (!saw_settings || procs_event.is_none()) {
+        let rem = deadline.saturating_duration_since(Instant::now());
+        let ev = h.messages.recv_timeout(rem).unwrap();
+        if ev["type"] == "settings" {
+            assert_eq!(ev["settings"]["auto_restart_hub"], true);
+            saw_settings = true;
+        } else if ev["type"] == "procs" {
+            procs_event = Some(ev);
+        }
+    }
+    assert!(saw_settings);
+    let procs = procs_event.expect("expected procs event");
+    assert_eq!(procs["providers"]["antigravity"]["blocked"], false);
+    assert_eq!(procs["providers"]["antigravity_cli"]["blocked"], false);
+}
+
+#[test]
+fn antigravity_delete_conv_removes_proto_summary_and_chapter_titles() {
+    let mut h = Harness::new();
+    let cid_keep = h.seed("antigravity");
+    let cid_del = h.seed("antigravity");
+    let root = h
+        .service
+        .provider("antigravity")
+        .unwrap()
+        .paths()
+        .root
+        .clone();
+    let chapters_dir = root.join("chapter_titles");
+    fs::create_dir_all(&chapters_dir).unwrap();
+    fs::write(chapters_dir.join(format!("{cid_keep}.pb")), b"keep-chapter").unwrap();
+    fs::write(chapters_dir.join(format!("{cid_del}.pb")), b"del-chapter").unwrap();
+
+    let mut proto = Vec::new();
+    for cid in [&cid_keep, &cid_del] {
+        let mut inner = k1tty_core::pbwire::encode_field(1, 2, cid.as_bytes());
+        inner.extend(k1tty_core::pbwire::encode_field(2, 2, b"summary"));
+        proto.extend(k1tty_core::pbwire::encode_field(1, 2, &inner));
+    }
+    let proto_path = root.join("agyhub_summaries_proto.pb");
+    fs::write(&proto_path, &proto).unwrap();
+
+    h.job(
+        "delete_conv",
+        "antigravity",
+        json!({"cid": cid_del, "confirm": true}),
+    );
+
+    assert!(!chapters_dir.join(format!("{cid_del}.pb")).exists());
+    assert!(chapters_dir.join(format!("{cid_keep}.pb")).is_file());
+    let remaining_cids: Vec<String> =
+        k1tty_core::pbwire::try_parse_fields(&fs::read(&proto_path).unwrap())
+            .unwrap()
+            .into_iter()
+            .filter_map(|f| k1tty_core::pbwire::string_at(f.bytes().unwrap_or_default(), &[1]))
+            .collect();
+    assert!(!remaining_cids.contains(&cid_del));
+    assert!(remaining_cids.contains(&cid_keep));
+}
